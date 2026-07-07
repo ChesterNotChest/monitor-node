@@ -1,0 +1,30 @@
+# Environment
+.env
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code / Codex (personal settings only — shared commands & skills ARE committed)
+.claude/settings.local.json
+.claude/settings.json
+.codex/settings.local.json
+
+# Flask
+instance/

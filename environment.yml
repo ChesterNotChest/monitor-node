@@ -1,0 +1,13 @@
+name: monitor-node
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.12
+  - ffmpeg>=7.0          # 系统级 FFmpeg 二进制
+  - pip
+  - pip:
+    - fastapi>=0.115
+    - uvicorn[standard]>=0.34
+    - python-dotenv>=1.0
+    - ffmpeg-python>=1.0  # Python FFmpeg 绑定
