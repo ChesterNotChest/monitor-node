@@ -1,7 +1,7 @@
 schema: spec-driven
 
 Project context
-Tech stack: Flask, FFmpeg
+Tech stack: FastAPI, FFmpeg
 
 
 
