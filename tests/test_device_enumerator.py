@@ -113,11 +113,6 @@ class TestEnumeratorWithMock:
         monkeypatch.setattr(asyncio, "create_subprocess_exec", mock_subprocess)
         monkeypatch.setattr("sys.platform", "win32")
         monkeypatch.setattr("services.device_enumerator._find_ffmpeg", lambda: "/fake/ffmpeg")
-        # Force ffmpeg dshow driver (MF requires comtypes, which would skip parsing)
-        monkeypatch.setattr(
-            "services.capture.MediaFoundationDriver.check_available",
-            lambda self: (_ for _ in ()).throw(RuntimeError("test")),
-        )
 
         devices = await enumerate_devices()
         assert len(devices) == 4
