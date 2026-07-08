@@ -34,21 +34,25 @@ def cam_device():
 class TestRtmpUrl:
     def test_default_url(self, monkeypatch):
         monkeypatch.delenv("SERVER_RTMP_URL", raising=False)
+        monkeypatch.setenv("STREAM_DEBUG", "false")
         url = _build_rtmp_url("cam-01")
         assert url == "rtmp://127.0.0.1:1935/live/cam-01"
 
     def test_custom_url(self, monkeypatch):
         monkeypatch.setenv("SERVER_RTMP_URL", "rtmp://myserver.example.com/live")
+        monkeypatch.setenv("STREAM_DEBUG", "false")
         url = _build_rtmp_url("cam-01")
         assert url == "rtmp://myserver.example.com/live/cam-01"
 
     def test_url_no_trailing_slash(self, monkeypatch):
         monkeypatch.setenv("SERVER_RTMP_URL", "rtmp://server/live")
+        monkeypatch.setenv("STREAM_DEBUG", "false")
         url = _build_rtmp_url("cam-01")
         assert url == "rtmp://server/live/cam-01"
 
     def test_url_with_trailing_slash(self, monkeypatch):
         monkeypatch.setenv("SERVER_RTMP_URL", "rtmp://server/live/")
+        monkeypatch.setenv("STREAM_DEBUG", "false")
         url = _build_rtmp_url("cam-01")
         assert url == "rtmp://server/live/cam-01"
 

@@ -26,5 +26,17 @@ Thumbs.db
 .claude/settings.json
 .codex/settings.local.json
 
-# Flask
-instance/
+# Node.js
+node_modules/
+
+# RTMP server
+rtmp_server/node_modules/
+rtmp_server/package-lock.json
+
+# Testing
+.coverage
+.pytest_cache/
+htmlcov/
+
+# Logs
+*.log

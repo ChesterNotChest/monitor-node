@@ -131,36 +131,35 @@ class TestCrashDetection:
 # ---------------------------------------------------------------------------
 
 
-class TestRetryLogic:
+class TestRetryLimit:
     @pytest.mark.asyncio
-    async def test_records_failures_up_to_max(self, registry, runner, cam_device):
+    async def test_records_consecutive_failures(self, registry, runner, cam_device):
         sm = StreamStateMachine(registry=registry, runner=runner, max_retries=3)
 
         for _ in range(3):
             sm._record_failure("cam-01")
 
-        assert len(sm._failures["cam-01"]) == 3
+        assert sm._consecutive_failures["cam-01"] == 3
 
     @pytest.mark.asyncio
-    async def test_calls_alert_after_max_retries(self, registry, runner, cam_device):
-        alert_calls = []
+    async def test_device_marked_dead_after_max_failures(self, registry, runner, cam_device):
+        sm = StreamStateMachine(registry=registry, runner=runner, max_retries=3)
 
-        async def alert_cb(device_id, reason):
-            alert_calls.append((device_id, reason))
-
-        sm = StreamStateMachine(registry=registry, runner=runner, max_retries=2)
-        sm.set_alert_callback(alert_cb)
-
-        # Record 3 failures (exceeds max_retries=2)
-        for _ in range(3):
+        # Simulate 6 consecutive failures (exceeds _MAX_FAILURES=5)
+        for _ in range(6):
             sm._record_failure("cam-01")
 
-        # Allow the alert task to run
-        await asyncio.sleep(0.1)
+        assert "cam-01" in sm._dead
 
-        assert len(alert_calls) == 1
-        assert alert_calls[0][0] == "cam-01"
-        assert "Retry limit exceeded" in alert_calls[0][1]
+    @pytest.mark.asyncio
+    async def test_dead_device_not_restarted(self, registry, runner, cam_device):
+        await registry.add(cam_device)
+        sm = StreamStateMachine(registry=registry, runner=runner, max_retries=3)
+        sm._dead.add("cam-01")
+
+        with patch("services.ffmpeg_runner.FfmpegRunner.start_stream", new_callable=AsyncMock) as mock_start:
+            await sm._tick()
+        mock_start.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

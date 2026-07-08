@@ -1,21 +1,21 @@
 ## 1. Embedded RTMP Server
 
-- [ ] 1.1 创建 `rtmp_server/` 目录：`package.json`、`index.js`（使用 `node-media-server`）
-- [ ] 1.2 `rtmp_server/index.js`：监听 `rtmp://127.0.0.1:1935/live`，启动时 console.log 地址
-- [ ] 1.3 `npm install` 安装 `node-media-server` 依赖
-- [ ] 1.4 `app.py`：STREAM_DEBUG 时 `_start_rtmp_server()` 启动 Node.js 子进程
-- [ ] 1.5 `app.py`：STREAM_DEBUG 时打印 `RTMP 服务器已启动: rtmp://127.0.0.1:1935/live` 和各设备拉流地址
-- [ ] 1.6 `app.py` shutdown 时 `_stop_rtmp_server()` 终止 Node.js 进程
-- [ ] 1.7 gitignore：添加 `rtmp_server/node_modules/`
+- [x] 1.1 创建 `rtmp_server/` 目录：`package.json`、`index.js`（使用 `node-media-server`）
+- [x] 1.2 `rtmp_server/index.js`：监听 `rtmp://127.0.0.1:1935/live`，启动时 console.log 地址
+- [x] 1.3 `npm install` 安装 `node-media-server` 依赖
+- [x] 1.4 `app.py`：STREAM_DEBUG 时 `_start_rtmp_server()` 启动 Node.js 子进程
+- [x] 1.5 `app.py`：STREAM_DEBUG 时打印 `RTMP 服务器已启动: rtmp://127.0.0.1:1935/live` 和各设备拉流地址
+- [x] 1.6 `app.py` shutdown 时 `_stop_rtmp_server()` 终止 Node.js 进程
+- [x] 1.7 gitignore：添加 `rtmp_server/node_modules/`
 
 ## 2. Capture Driver Layer
 
-- [ ] 2.1 创建 `services/capture/__init__.py`：`get_capture_driver()` 工厂（Windows → MF，fallback → ffmpeg，macOS/Linux → ffmpeg）
-- [ ] 2.2 创建 `services/capture/base.py`：`CaptureDriver` ABC（`list_devices_command` / `capture_command` / `parse_device_list`）
-- [ ] 2.3 创建 `services/capture/media_foundation.py`：实现 `MediaFoundationDriver`
-- [ ] 2.4 创建 `services/capture/ffmpeg_dshow.py`：将原有 dshow 逻辑迁移到此
-- [ ] 2.5 创建 `services/capture/ffmpeg_avfoundation.py`：将原有 avfoundation 逻辑迁移到此
-- [ ] 2.6 创建 `services/capture/ffmpeg_v4l2.py`：将原有 v4l2 逻辑迁移到此
+- [x] 2.1 创建 `services/capture/__init__.py`：`get_capture_driver()` 工厂（Windows → MF，fallback → ffmpeg，macOS/Linux → ffmpeg）
+- [x] 2.2 创建 `services/capture/base.py`：`CaptureDriver` ABC（`list_devices_command` / `capture_command` / `parse_device_list`）
+- [x] 2.3 创建 `services/capture/media_foundation.py`：实现 `MediaFoundationDriver`
+- [x] 2.4 创建 `services/capture/ffmpeg_dshow.py`：将原有 dshow 逻辑迁移到此
+- [x] 2.5 创建 `services/capture/ffmpeg_avfoundation.py`：将原有 avfoundation 逻辑迁移到此
+- [x] 2.6 创建 `services/capture/ffmpeg_v4l2.py`：将原有 v4l2 逻辑迁移到此
 
 ## 3. Media Foundation Capture Implementation
 

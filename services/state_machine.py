@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 _POLL_INTERVAL = 5          # seconds between reconciliation ticks
 _MAX_RETRIES = 3            # max restart attempts per device before giving up
 _RETRY_WINDOW = 30          # seconds — sliding window for retry counting
+_MAX_FAILURES = 5           # consecutive failures before marking device dead
 
 # ---------------------------------------------------------------------------
 # State machine
@@ -49,6 +50,10 @@ class StreamStateMachine:
 
         # Retry tracking: device_id → list of failure timestamps
         self._failures: dict[str, list[float]] = {}
+        # Consecutive failure counter (separate from sliding-window retries)
+        self._consecutive_failures: dict[str, int] = {}
+        # Devices that exceeded _MAX_FAILURES and should not be restarted
+        self._dead: set[str] = set()
 
         # Callback for notifying external systems about events
         self._on_alert: Optional[callable] = None
@@ -104,8 +109,8 @@ class StreamStateMachine:
 
         enabled_ids = set(enabled_snapshot.keys())
 
-        # 2. Start streams for new devices
-        to_start = enabled_ids - running_set
+        # 2. Start streams for new devices (skip dead ones)
+        to_start = enabled_ids - running_set - self._dead
         for device_id in to_start:
             device = enabled_snapshot[device_id]
             logger.info("State machine: starting stream for %s", device_id)
@@ -126,45 +131,38 @@ class StreamStateMachine:
             proc_handle = self._runner._processes.get(device_id)
             if proc_handle is not None and proc_handle.returncode is not None:
                 # Process exited
-                logger.warning(
-                    "ffmpeg for %s exited with code %s",
-                    device_id,
-                    proc_handle.returncode,
-                )
-                # Remove dead process so it can be restarted next tick
                 self._runner._processes.pop(device_id, None)
                 self._record_failure(device_id)
+            elif proc_handle is not None and proc_handle.returncode is None:
+                # Process is healthy — reset consecutive failure counter
+                if device_id in self._consecutive_failures:
+                    self._consecutive_failures[device_id] = 0
 
     # ------------------------------------------------------------------
     # Retry logic
     # ------------------------------------------------------------------
 
     def _record_failure(self, device_id: str) -> None:
-        """Record a failure and attempt restart if under the retry limit."""
+        """Record a failure. Mark device dead after _MAX_FAILURES consecutive failures."""
         now = asyncio.get_event_loop().time()
         if device_id not in self._failures:
             self._failures[device_id] = []
-        # Keep only recent failures within the retry window
         self._failures[device_id] = [
             ts for ts in self._failures[device_id]
             if now - ts < _RETRY_WINDOW
         ]
         self._failures[device_id].append(now)
 
-        count = len(self._failures[device_id])
-        if count <= self._max_retries:
-            logger.info(
-                "Retry %d/%d for %s",
-                count, self._max_retries, device_id,
-            )
-        else:
-            logger.error(
-                "Device %s exceeded retry limit (%d failures in %ds), alerting",
-                device_id, count, _RETRY_WINDOW,
-            )
-            if self._on_alert:
-                asyncio.create_task(
-                    self._on_alert(device_id, f"Retry limit exceeded: {count} failures")
+        # Consecutive failure tracking (reset on success via _tick)
+        self._consecutive_failures[device_id] = self._consecutive_failures.get(device_id, 0) + 1
+        n = self._consecutive_failures[device_id]
+
+        if n > _MAX_FAILURES:
+            if device_id not in self._dead:
+                self._dead.add(device_id)
+                logger.warning(
+                    "[%s] 连续失败 %d 次，已停止重试（可能是设备或驱动不兼容）",
+                    device_id, _MAX_FAILURES,
                 )
 
     # ------------------------------------------------------------------

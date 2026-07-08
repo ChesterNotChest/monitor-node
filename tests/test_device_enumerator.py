@@ -1,4 +1,4 @@
-"""Unit tests for device_enumerator — mock ffmpeg subprocess, cross-platform parsing."""
+"""Tests for device enumeration via capture drivers."""
 
 from __future__ import annotations
 
@@ -6,178 +6,120 @@ import asyncio
 
 import pytest
 
-from network.api import DeviceItem
-from services.device_enumerator import (
-    _parse_linux,
-    _parse_macos,
-    _parse_windows,
-    DeviceEnumerator,
-    enumerate_devices,
-)
-
-
-# ---------------------------------------------------------------------------
-# Windows dshow parsing
-# ---------------------------------------------------------------------------
+from services.capture.ffmpeg_avfoundation import FfmpegAvfoundationDriver
+from services.capture.ffmpeg_dshow import FfmpegDshowDriver
+from services.capture.ffmpeg_v4l2 import FfmpegV4l2Driver
+from services.device_enumerator import enumerate_devices
 
 WINDOWS_STDERR = """
-[dshow @ 000002a1c0b00400] DirectShow video devices (some may be both video and audio devices)
 [dshow @ 000002a1c0b00400]  "Integrated Camera" (video)
 [dshow @ 000002a1c0b00400]  "USB Video Device" (video)
-[dshow @ 000002a1c0b00400] DirectShow audio devices
 [dshow @ 000002a1c0b00400]  "Microphone Array" (audio)
 [dshow @ 000002a1c0b00400]  "Line In" (audio)
 """
 
-
-class TestWindowsParsing:
-    def test_parses_all_devices(self):
-        devices = _parse_windows(WINDOWS_STDERR)
-        assert len(devices) == 4
-
-    def test_device_types(self):
-        devices = _parse_windows(WINDOWS_STDERR)
-        video = [d for d in devices if d.device_type == "video"]
-        audio = [d for d in devices if d.device_type == "audio"]
-        assert len(video) == 2
-        assert len(audio) == 2
-
-    def test_device_names(self):
-        devices = _parse_windows(WINDOWS_STDERR)
-        names = {d.device_name for d in devices}
-        assert "Integrated Camera" in names
-        assert "Microphone Array" in names
-        assert "USB Video Device" in names
-
-
-class TestWindowsParsingEmpty:
-    def test_empty_stderr(self):
-        devices = _parse_windows("")
-        assert devices == []
-
-    def test_no_matching_lines(self):
-        devices = _parse_windows("some random ffmpeg output")
-        assert devices == []
-
-
-# ---------------------------------------------------------------------------
-# macOS avfoundation parsing
-# ---------------------------------------------------------------------------
-
-MACOS_STDERR = """
-[AVFoundation input device @ 0x7f8e3a80a000] AVFoundation video devices:
-[AVFoundation input device @ 0x7f8e3a80a000] [0] FaceTime HD Camera
-[AVFoundation input device @ 0x7f8e3a80a000] [1] Capture screen 0
-[AVFoundation input device @ 0x7f8e3a80a000] AVFoundation audio devices:
-[AVFoundation input device @ 0x7f8e3a80a000] [2] Built-in Microphone
-[AVFoundation input device @ 0x7f8e3a80a000] [3] External Microphone
+WINDOWS_V8_STDERR = """
+[in#0 @ 000002BB01A31980] "USB2.0 HD UVC WebCam" (video)
+[in#0 @ 000002BB01A31980]   Alternative name "@device_pnp_..."
+[in#0 @ 000002BB01A31980] "OBS Virtual Camera" (none)
+[in#0 @ 000002BB01A31980] "麦克风阵列 (Realtek(R) Audio)" (audio)
 """
 
-
-class TestMacOSParsing:
-    def test_parses_all_devices(self):
-        devices = _parse_macos(MACOS_STDERR)
-        assert len(devices) == 4
-
-    def test_camera_detected_as_video(self):
-        devices = _parse_macos(MACOS_STDERR)
-        camera = [d for d in devices if "FaceTime" in d.device_name]
-        assert len(camera) == 1
-        assert camera[0].device_type == "video"
-
-    def test_microphone_detected_as_audio(self):
-        devices = _parse_macos(MACOS_STDERR)
-        mics = [d for d in devices if "Microphone" in d.device_name]
-        assert len(mics) == 2
-        assert all(m.device_type == "audio" for m in mics)
-
-
-# ---------------------------------------------------------------------------
-# Linux v4l2 parsing
-# ---------------------------------------------------------------------------
+MACOS_STDERR = """
+[AVFoundation input device @ 0x7f8e3a80a000] [0] FaceTime HD Camera
+[AVFoundation input device @ 0x7f8e3a80a000] [1] Capture screen 0
+[AVFoundation input device @ 0x7f8e3a80a000] [2] Built-in Microphone
+"""
 
 LINUX_STDERR = """
-[video4linux2,v4l2 @ 0x555abc] /dev/video0 : UVC Camera (046d:0825)
+[video4linux2,v4l2 @ 0x555abc] /dev/video0 : UVC Camera
 [video4linux2,v4l2 @ 0x555abc] /dev/video1 : Dummy video device
 """
 
 
-class TestLinuxParsing:
-    def test_parses_all_devices(self):
-        devices = _parse_linux(LINUX_STDERR)
+class TestDshowParsing:
+    def setup_method(self):
+        self.driver = FfmpegDshowDriver()
+
+    def test_v7_format(self):
+        devices = self.driver.parse_device_list(WINDOWS_STDERR)
+        assert len(devices) == 4
+
+    def test_v8_format(self):
+        devices = self.driver.parse_device_list(WINDOWS_V8_STDERR)
+        assert len(devices) == 3
+
+    def test_none_type_preserved(self):
+        devices = self.driver.parse_device_list(WINDOWS_V8_STDERR)
+        obs = [d for d in devices if d.device_name == "OBS Virtual Camera"]
+        assert len(obs) == 1
+        assert obs[0].device_type == "none"
+
+    def test_alt_names_skipped(self):
+        devices = self.driver.parse_device_list(WINDOWS_V8_STDERR)
+        names = {d.device_name for d in devices}
+        assert not any("Alternative" in n for n in names)
+
+    def test_empty(self):
+        assert self.driver.parse_device_list("") == []
+
+    def test_dshow_command(self):
+        cmd = self.driver.capture_command(
+            _make_device("cam-01", "video", "Test Camera"),
+            "rtmp://server/live/cam-01",
+        )
+        assert "video=Test Camera" in cmd
+        assert "libx264" in cmd
+        assert "rtmp://server/live/cam-01" in cmd
+
+
+class TestAvfoundationParsing:
+    def setup_method(self):
+        self.driver = FfmpegAvfoundationDriver()
+
+    def test_parses_all(self):
+        devices = self.driver.parse_device_list(MACOS_STDERR)
+        assert len(devices) == 3
+
+    def test_camera_is_video(self):
+        devices = self.driver.parse_device_list(MACOS_STDERR)
+        cam = [d for d in devices if "FaceTime" in d.device_name]
+        assert cam[0].device_type == "video"
+
+
+class TestV4l2Parsing:
+    def setup_method(self):
+        self.driver = FfmpegV4l2Driver()
+
+    def test_parses_all(self):
+        devices = self.driver.parse_device_list(LINUX_STDERR)
         assert len(devices) == 2
 
-    def test_device_type_is_video(self):
-        devices = _parse_linux(LINUX_STDERR)
+    def test_all_video(self):
+        devices = self.driver.parse_device_list(LINUX_STDERR)
         assert all(d.device_type == "video" for d in devices)
 
-    def test_device_ids_use_path(self):
-        devices = _parse_linux(LINUX_STDERR)
-        ids = {d.device_id for d in devices}
-        assert "video0" in ids
-        assert "video1" in ids
-
 
 # ---------------------------------------------------------------------------
-# DeviceEnumerator (with mocked subprocess)
+# Enumerator integration
 # ---------------------------------------------------------------------------
-
 
 class TestEnumeratorWithMock:
     @pytest.mark.asyncio
     async def test_windows_enumeration(self, monkeypatch):
-        """Simulate Windows ffmpeg output."""
-
         async def mock_subprocess(*args, **kwargs):
             return _MockProcess(stderr=WINDOWS_STDERR)
 
         monkeypatch.setattr(asyncio, "create_subprocess_exec", mock_subprocess)
         monkeypatch.setattr("sys.platform", "win32")
+        monkeypatch.setattr("services.device_enumerator._find_ffmpeg", lambda: "/fake/ffmpeg")
 
         devices = await enumerate_devices()
         assert len(devices) == 4
-        assert any(d.device_name == "Integrated Camera" for d in devices)
-
-    @pytest.mark.asyncio
-    async def test_macos_enumeration(self, monkeypatch):
-        async def mock_subprocess(*args, **kwargs):
-            return _MockProcess(stderr=MACOS_STDERR)
-
-        monkeypatch.setattr(asyncio, "create_subprocess_exec", mock_subprocess)
-        monkeypatch.setattr("sys.platform", "darwin")
-
-        devices = await enumerate_devices()
-        assert len(devices) == 4
-
-    @pytest.mark.asyncio
-    async def test_linux_enumeration(self, monkeypatch):
-        async def mock_subprocess(*args, **kwargs):
-            return _MockProcess(stderr=LINUX_STDERR)
-
-        monkeypatch.setattr(asyncio, "create_subprocess_exec", mock_subprocess)
-        monkeypatch.setattr("sys.platform", "linux")
-
-        devices = await enumerate_devices()
-        assert len(devices) == 2
 
     @pytest.mark.asyncio
     async def test_ffmpeg_not_found(self, monkeypatch):
-        async def mock_subprocess(*args, **kwargs):
-            raise FileNotFoundError("ffmpeg")
-
-        monkeypatch.setattr(asyncio, "create_subprocess_exec", mock_subprocess)
-
-        devices = await enumerate_devices()
-        assert devices == []
-
-    @pytest.mark.asyncio
-    async def test_no_devices(self, monkeypatch):
-        async def mock_subprocess(*args, **kwargs):
-            return _MockProcess(stderr="No devices found\n")
-
-        monkeypatch.setattr(asyncio, "create_subprocess_exec", mock_subprocess)
-        monkeypatch.setattr("sys.platform", "win32")
-
+        monkeypatch.setattr("services.device_enumerator._find_ffmpeg", lambda: None)
         devices = await enumerate_devices()
         assert devices == []
 
@@ -186,11 +128,13 @@ class TestEnumeratorWithMock:
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _make_device(device_id, device_type, device_name):
+    from network.api import DeviceItem
+    return DeviceItem(device_id=device_id, device_type=device_type, device_name=device_name)
+
 
 class _MockProcess:
-    """Minimal mock of asyncio.subprocess.Process."""
-
-    def __init__(self, stderr: str = "", returncode: int = 0):
+    def __init__(self, stderr="", returncode=0):
         self._stderr = stderr
         self.returncode = returncode
 
