@@ -1,9 +1,16 @@
+# Core
 fastapi>=0.115
 uvicorn[standard]>=0.34
 python-dotenv>=1.0
-ffmpeg-python>=1.0
+
+# WSS client
+websockets>=14.0
+
+# Media Foundation capture (Windows only, optional)
+comtypes>=1.4
 
 # dev / test
 pytest>=8.0
 pytest-asyncio>=0.25
 pytest-cov>=6.0
+httpx>=0.28

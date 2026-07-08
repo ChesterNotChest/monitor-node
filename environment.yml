@@ -4,13 +4,16 @@ channels:
   - defaults
 dependencies:
   - python=3.12
-  - ffmpeg>=7.0          # 系统级 FFmpeg 二进制
+  - ffmpeg>=7.0          # system-level FFmpeg binary
+  - nodejs>=20           # Node.js (for embedded RTMP server in STREAM_DEBUG)
   - pip
   - pip:
     - fastapi>=0.115
     - uvicorn[standard]>=0.34
     - python-dotenv>=1.0
-    - ffmpeg-python>=1.0  # Python FFmpeg 绑定
+    - websockets>=14.0
+    - comtypes>=1.4      # Windows Media Foundation capture (optional)
     - pytest>=8.0
     - pytest-asyncio>=0.25
     - pytest-cov>=6.0
+    - httpx>=0.28

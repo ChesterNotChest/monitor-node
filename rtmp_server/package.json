@@ -1,0 +1,8 @@
+{
+  "name": "monitor-node-rtmp-server",
+  "private": true,
+  "description": "Embedded RTMP server for STREAM_DEBUG mode",
+  "dependencies": {
+    "node-media-server": "^2.6.0"
+  }
+}
