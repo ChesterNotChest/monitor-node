@@ -37,21 +37,46 @@ class FfmpegDshowDriver(CaptureDriver):
         # ffmpeg >= 8.x: video=<name> / audio=<name>
         # type "none" (virtual camera): bare name
         if device.device_type == "audio":
-            input_name = f"audio={device.device_name}"
+            return self._audio_command(device, rtmp_url)
         elif device.device_type == "none":
-            input_name = device.device_name
+            return self._video_command(device.device_name, rtmp_url)
         else:
-            input_name = f"video={device.device_name}"
+            return self._video_command(
+                f"video={device.device_name}", rtmp_url,
+            )
 
+    def _video_command(self, input_name: str, rtmp_url: str) -> list[str]:
+        """Build ffmpeg command for a video dshow device.
+
+        Forces 640x480@15fps to avoid MJPEG decoder issues with some USB
+        cameras on ffmpeg >= 8.x.  At this resolution the camera typically
+        falls back to yuyv422 which decodes reliably.
+        """
         return [
             "ffmpeg",
             "-rtbufsize", "256M",
             "-f", "dshow",
+            "-video_size", "640x480",
+            "-framerate", "15",
             "-i", input_name,
             "-c:v", "libx264",
             "-preset", "veryfast",
             "-tune", "zerolatency",
             "-pix_fmt", "yuv420p",
+            "-f", "flv",
+            rtmp_url,
+            "-y",
+        ]
+
+    def _audio_command(self, device: DeviceItem, rtmp_url: str) -> list[str]:
+        """Build ffmpeg command for an audio dshow device."""
+        return [
+            "ffmpeg",
+            "-rtbufsize", "256M",
+            "-f", "dshow",
+            "-i", f"audio={device.device_name}",
+            "-c:a", "aac",
+            "-b:a", "128k",
             "-f", "flv",
             rtmp_url,
             "-y",

@@ -24,13 +24,11 @@ class MediaFoundationDriver(CaptureDriver):
     """
 
     def check_available(self) -> None:
-        """Verify that ``comtypes`` (or equivalent) is importable."""
-        try:
-            import comtypes  # noqa: F401
-        except ImportError:
-            raise RuntimeError(
-                "comtypes not installed — run: pip install comtypes"
-            ) from None
+        """Verify that the MF capture loop is implemented and usable."""
+        # MF capture loop (device open, frame read, stdin pipe) is not yet
+        # implemented.  Raise unconditionally so the factory falls back to
+        # FfmpegDshowDriver, which handles the full pipeline correctly.
+        raise RuntimeError("MF capture loop not yet implemented")
 
     # ------------------------------------------------------------------
     # Device listing
