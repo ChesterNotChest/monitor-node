@@ -69,7 +69,7 @@ class TestDshowParsing:
             "rtmp://server/live/cam-01",
         )
         assert "video=Test Camera" in cmd
-        assert "libx264" in cmd
+        assert "libopenh264" in cmd
         assert "rtmp://server/live/cam-01" in cmd
 
 

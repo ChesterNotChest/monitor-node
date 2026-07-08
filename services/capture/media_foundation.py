@@ -59,9 +59,8 @@ class MediaFoundationDriver(CaptureDriver):
             "-s", "640x480",
             "-r", "15",
             "-i", "-",               # stdin
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-tune", "zerolatency",
+            "-c:v", "libopenh264",
+            "-allow_skip_frames", "1",
             "-pix_fmt", "yuv420p",
             "-f", "flv",
             rtmp_url,
