@@ -11,6 +11,7 @@ import logging
 
 from network.api import DeviceItem
 from services.capture.base import CaptureDriver
+from services.capture.encoder_resolver import get_video_encoder
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +60,7 @@ class MediaFoundationDriver(CaptureDriver):
             "-s", "640x480",
             "-r", "15",
             "-i", "-",               # stdin
-            "-c:v", "libopenh264",
-            "-allow_skip_frames", "1",
+            "-c:v", get_video_encoder(),
             "-pix_fmt", "yuv420p",
             "-f", "flv",
             rtmp_url,

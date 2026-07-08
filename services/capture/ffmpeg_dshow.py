@@ -6,6 +6,7 @@ import re
 
 from network.api import DeviceItem
 from services.capture.base import CaptureDriver
+from services.capture.encoder_resolver import get_audio_encoder, get_video_encoder
 
 # Matches both ffmpeg 7.x format:  [dshow @ …] "name" (type)
 #          and ffmpeg 8.x format:  [in#0 @ …] "name" (type)
@@ -59,8 +60,7 @@ class FfmpegDshowDriver(CaptureDriver):
             "-video_size", "640x480",
             "-framerate", "15",
             "-i", input_name,
-            "-c:v", "libopenh264",
-            "-allow_skip_frames", "1",
+            "-c:v", get_video_encoder(),
             "-pix_fmt", "yuv420p",
             "-f", "flv",
             rtmp_url,
@@ -74,7 +74,7 @@ class FfmpegDshowDriver(CaptureDriver):
             "-rtbufsize", "256M",
             "-f", "dshow",
             "-i", f"audio={device.device_name}",
-            "-c:a", "aac",
+            "-c:a", get_audio_encoder(),
             "-b:a", "128k",
             "-f", "flv",
             rtmp_url,

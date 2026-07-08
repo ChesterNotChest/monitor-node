@@ -69,7 +69,7 @@ class TestDshowParsing:
             "rtmp://server/live/cam-01",
         )
         assert "video=Test Camera" in cmd
-        assert "libopenh264" in cmd
+        assert "-c:v" in cmd  # video encoder flag present (encoder selected dynamically)
         assert "rtmp://server/live/cam-01" in cmd
 
 
