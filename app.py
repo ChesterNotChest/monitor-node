@@ -207,6 +207,7 @@ async def _start_rtmp_server() -> None:
     except Exception:
         logger.exception("[RTMP_DEBUG] RTMP 服务器启动失败")
         return
+    line = b""
     try:
         line = await asyncio.wait_for(
             _RTMP_SERVER_PROC.stdout.readline(), timeout=5.0,
