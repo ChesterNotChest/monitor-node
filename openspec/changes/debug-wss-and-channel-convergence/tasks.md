@@ -112,3 +112,9 @@
   and still support `wss://` behind TLS/nginx.
 - [x] 13.2 Update WSS URL resolution tests.
 - [x] 13.3 Document the local default in `.env.example` and README.
+
+## 14. RTMP debug startup hardening
+
+- [x] 14.1 Specify that `RTMP_DEBUG=true` startup tolerates embedded RTMP server stdout timeout.
+- [x] 14.2 Initialize the startup stdout line before the timeout read.
+- [x] 14.3 Run node tests and RTMP_DEBUG startup smoke test.

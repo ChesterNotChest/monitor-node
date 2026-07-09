@@ -1,5 +1,20 @@
 # RTMP Streaming (Delta)
 
+## Runtime Hardening Delta
+
+### Requirement: RTMP debug server startup tolerates stdout timeout
+
+When `RTMP_DEBUG=true`, Node SHALL tolerate the embedded RTMP server producing
+no stdout line before the startup read timeout. The startup path SHALL keep the
+RTMP server process alive and SHALL NOT raise an unbound local variable error.
+
+#### Scenario: Embedded RTMP server is quiet during startup
+
+- **WHEN** Node starts with `RTMP_DEBUG=true` and the embedded RTMP server does
+  not emit a startup line before the read timeout
+- **THEN** Node continues startup without crashing
+- **AND** the RTMP server process remains available for local debug streaming
+
 ## MODIFIED Requirements
 
 ### Requirement: Each device gets a dedicated RTMP URL
