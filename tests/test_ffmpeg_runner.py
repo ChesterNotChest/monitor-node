@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from network.api import DeviceItem
-from services.ffmpeg_runner import FfmpegRunner, _build_rtmp_url, _is_debug_mode
+from network.models import DeviceItem
+from services.ffmpeg_runner import FfmpegRunner, _build_rtmp_url, _is_debug_mode, _slugify
 
 
 @pytest.fixture
@@ -26,35 +26,100 @@ def cam_device():
     )
 
 
+@pytest.fixture
+def audio_device():
+    return DeviceItem(
+        device_id="mic-01",
+        device_type="audio",
+        device_name="Microphone Array",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Slugify
+# ---------------------------------------------------------------------------
+
+
+class TestSlugify:
+    def test_simple_name(self):
+        assert _slugify("Integrated Camera") == "integrated-camera"
+
+    def test_special_characters(self):
+        slug = _slugify("USB2.0 HD UVC WebCam (04f2:b6fb)")
+        # 点号被移除（非单词字符），冒号和括号转为连字符
+        assert "usb20" in slug
+        assert "04f2" in slug
+        assert "b6fb" in slug
+        assert "(" not in slug
+        assert ")" not in slug
+
+    def test_spaces_to_hyphens(self):
+        assert _slugify("a b  c   d") == "a-b-c-d"
+
+    def test_preserves_chinese(self):
+        slug = _slugify("摄像头")
+        assert "摄像头" in slug
+
+    def test_empty_yields_unknown(self):
+        assert _slugify("") == "unknown"
+
+    def test_only_special_chars(self):
+        assert _slugify("()[]") == "unknown"
+
+
 # ---------------------------------------------------------------------------
 # RTMP URL construction
 # ---------------------------------------------------------------------------
 
 
 class TestRtmpUrl:
-    def test_default_url(self, monkeypatch):
-        monkeypatch.delenv("SERVER_RTMP_URL", raising=False)
-        monkeypatch.setenv("STREAM_DEBUG", "false")
-        url = _build_rtmp_url("cam-01")
-        assert url == "rtmp://127.0.0.1:1935/live/cam-01"
+    def test_url_format(self, monkeypatch, cam_device):
+        """RTMP URL 使用新格式。"""
+        monkeypatch.setenv("RTMP_DEBUG", "false")
+        monkeypatch.setenv("SERVER_BASE_URL", "192.168.1.100")
+        monkeypatch.setenv("RTMP_PORT", "1935")
 
-    def test_custom_url(self, monkeypatch):
-        monkeypatch.setenv("SERVER_RTMP_URL", "rtmp://myserver.example.com/live")
-        monkeypatch.setenv("STREAM_DEBUG", "false")
-        url = _build_rtmp_url("cam-01")
-        assert url == "rtmp://myserver.example.com/live/cam-01"
+        # 模拟 wss_client.node_id — 需要 patch 到 network.wss_client 模块
+        with patch("network.wss_client.wss_client") as mock_wss:
+            mock_wss.node_id = "node-abc123"
+            url = _build_rtmp_url(cam_device)
 
-    def test_url_no_trailing_slash(self, monkeypatch):
-        monkeypatch.setenv("SERVER_RTMP_URL", "rtmp://server/live")
-        monkeypatch.setenv("STREAM_DEBUG", "false")
-        url = _build_rtmp_url("cam-01")
-        assert url == "rtmp://server/live/cam-01"
+        assert url == "rtmp://192.168.1.100:1935/live/node-abc123_video_test-camera"
 
-    def test_url_with_trailing_slash(self, monkeypatch):
-        monkeypatch.setenv("SERVER_RTMP_URL", "rtmp://server/live/")
-        monkeypatch.setenv("STREAM_DEBUG", "false")
-        url = _build_rtmp_url("cam-01")
-        assert url == "rtmp://server/live/cam-01"
+    def test_url_debug_mode(self, monkeypatch, cam_device):
+        """RTMP_DEBUG 时强制 127.0.0.1。"""
+        monkeypatch.setenv("RTMP_DEBUG", "true")
+        monkeypatch.setenv("RTMP_PORT", "1935")
+
+        with patch("network.wss_client.wss_client") as mock_wss:
+            mock_wss.node_id = "debug-node-001"
+            url = _build_rtmp_url(cam_device)
+
+        assert url.startswith("rtmp://127.0.0.1:1935/live/debug-node-001_video_")
+
+    def test_url_audio_device(self, monkeypatch, audio_device):
+        """音频设备 URL 包含 audio 类型。"""
+        monkeypatch.setenv("RTMP_DEBUG", "false")
+        monkeypatch.setenv("SERVER_BASE_URL", "server.local")
+        monkeypatch.setenv("RTMP_PORT", "1935")
+
+        with patch("network.wss_client.wss_client") as mock_wss:
+            mock_wss.node_id = "node-1"
+            url = _build_rtmp_url(audio_device)
+
+        assert "_audio_" in url
+
+    def test_url_unauthenticated_node(self, monkeypatch, cam_device):
+        """未认证时使用 'unauthenticated' 占位。"""
+        monkeypatch.setenv("RTMP_DEBUG", "false")
+        monkeypatch.setenv("SERVER_BASE_URL", "192.168.1.100")
+        monkeypatch.setenv("RTMP_PORT", "1935")
+
+        with patch("network.wss_client.wss_client") as mock_wss:
+            mock_wss.node_id = None
+            url = _build_rtmp_url(cam_device)
+
+        assert "unauthenticated_video_" in url
 
 
 # ---------------------------------------------------------------------------
@@ -64,19 +129,19 @@ class TestRtmpUrl:
 
 class TestDebugMode:
     def test_debug_off_by_default(self, monkeypatch):
-        monkeypatch.delenv("STREAM_DEBUG", raising=False)
+        monkeypatch.delenv("RTMP_DEBUG", raising=False)
         assert _is_debug_mode() is False
 
     def test_debug_true(self, monkeypatch):
-        monkeypatch.setenv("STREAM_DEBUG", "true")
+        monkeypatch.setenv("RTMP_DEBUG", "true")
         assert _is_debug_mode() is True
 
     def test_debug_1(self, monkeypatch):
-        monkeypatch.setenv("STREAM_DEBUG", "1")
+        monkeypatch.setenv("RTMP_DEBUG", "1")
         assert _is_debug_mode() is True
 
     def test_debug_false(self, monkeypatch):
-        monkeypatch.setenv("STREAM_DEBUG", "false")
+        monkeypatch.setenv("RTMP_DEBUG", "false")
         assert _is_debug_mode() is False
 
 
@@ -89,12 +154,17 @@ class TestStartStop:
     @pytest.mark.asyncio
     async def test_start_stream_creates_subprocess(self, runner, cam_device, monkeypatch):
         monkeypatch.setattr("sys.platform", "win32")
+        monkeypatch.setenv("RTMP_DEBUG", "false")
+        monkeypatch.setenv("SERVER_BASE_URL", "127.0.0.1")
+        monkeypatch.setenv("RTMP_PORT", "1935")
 
         mock_proc = AsyncMock()
         mock_proc.returncode = None
 
-        with patch.object(asyncio, "create_subprocess_exec", return_value=mock_proc) as mock_exec:
-            proc = await runner.start_stream(cam_device)
+        with patch("network.wss_client.wss_client") as mock_wss:
+            mock_wss.node_id = "test-node"
+            with patch.object(asyncio, "create_subprocess_exec", return_value=mock_proc) as mock_exec:
+                proc = await runner.start_stream(cam_device)
 
         mock_exec.assert_called_once()
         assert proc is mock_proc
@@ -128,7 +198,6 @@ class TestStartStop:
         mock_proc.returncode = None
         mock_proc.terminate = MagicMock()
         mock_proc.kill = MagicMock()
-        # First wait() → TimeoutError, second wait() (after kill) → success
         mock_proc.wait = AsyncMock(side_effect=[asyncio.TimeoutError(), None])
 
         runner._processes["cam-01"] = mock_proc

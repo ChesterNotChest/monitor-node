@@ -1,15 +1,17 @@
 """WSS Client — persistent WebSocket connection to remote Server.
 
 Features:
+- Token-based identity authentication (auth → auth_ack → NodeID)
 - Exponential backoff reconnection (1s → 2s → 4s → … max 60s)
-- Heartbeat every 30s
-- Message dispatch by ``command`` field
-- Aligns with ``ServerCommand`` enum
+- Heartbeat every 30s (only after successful authentication)
+- Message dispatch by ``command`` field after authentication
+- DEBUG_WSS mode: fixed token, local non-encrypted WebSocket
 
 Usage::
 
-    client = WssClient(server_url, message_handler)
+    client = WssClient()
     await client.start()
+    # After auth completes, client.node_id is available
 """
 
 from __future__ import annotations
@@ -23,7 +25,7 @@ from typing import Any, Awaitable, Callable, Optional
 import websockets
 import websockets.exceptions
 
-from constant import ServerCommand
+from constant import AuthStatus, NodeResponse
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +37,7 @@ _HEARTBEAT_INTERVAL = 30     # seconds
 _INITIAL_BACKOFF = 1.0       # seconds
 _MAX_BACKOFF = 60.0          # seconds
 _BACKOFF_MULTIPLIER = 2.0
+_AUTH_TIMEOUT = 10.0         # seconds to wait for auth_ack
 
 # ---------------------------------------------------------------------------
 # Types
@@ -48,14 +51,14 @@ MessageHandler = Callable[[dict[str, Any]], Awaitable[None]]
 
 
 class WssClient:
-    """WebSocket Secure client with reconnection and heartbeat."""
+    """WebSocket Secure client with reconnection, auth, and heartbeat."""
 
     def __init__(
         self,
         url: Optional[str] = None,
         message_handler: Optional[MessageHandler] = None,
     ) -> None:
-        self._url = url or os.getenv("SERVER_WS_URL", "ws://127.0.0.1:8443/ws")
+        self._url = url  # None → will be built from config in start()
         self._handler = message_handler or self._default_handler
 
         self._ws: Optional[websockets.WebSocketClientProtocol] = None
@@ -64,6 +67,10 @@ class WssClient:
         self._connected = False
         self._backoff = _INITIAL_BACKOFF
 
+        # 身份认证状态
+        self._node_id: Optional[str] = None
+        self._auth_status = AuthStatus.PENDING
+
     # ------------------------------------------------------------------
     # Properties
     # ------------------------------------------------------------------
@@ -71,6 +78,15 @@ class WssClient:
     @property
     def is_connected(self) -> bool:
         return self._connected
+
+    @property
+    def is_authenticated(self) -> bool:
+        return self._auth_status == AuthStatus.AUTHENTICATED
+
+    @property
+    def node_id(self) -> Optional[str]:
+        """Server 分配的 NodeID，认证成功后方可用。"""
+        return self._node_id
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -82,7 +98,7 @@ class WssClient:
             return
         self._running = True
         self._task = asyncio.create_task(self._connect_loop())
-        logger.info("WSS client started, target: %s", self._url)
+        logger.info("WSS client started, target: %s", self._resolve_url())
 
     async def stop(self) -> None:
         """Close the connection and stop the reconnect loop."""
@@ -98,16 +114,61 @@ class WssClient:
         logger.info("WSS client stopped")
 
     # ------------------------------------------------------------------
+    # URL resolution
+    # ------------------------------------------------------------------
+
+    def _resolve_url(self) -> str:
+        """Build WSS URL from config fields.
+
+        DEBUG_WSS=true → ws://127.0.0.1:{WSS_PORT}/ws
+        否则           → ws://{SERVER_BASE_URL}:{WSS_PORT}/ws
+                        （生产环境通过 nginx 升级为 wss://）
+        """
+        if self._url:
+            return self._url
+
+        is_debug_wss = os.getenv("DEBUG_WSS", "false").lower() in ("true", "1", "yes")
+        base = "127.0.0.1" if is_debug_wss else os.getenv("SERVER_BASE_URL", "127.0.0.1")
+        port = os.getenv("WSS_PORT", "8443")
+        protocol = "ws" if is_debug_wss else "wss"
+        return f"{protocol}://{base}:{port}/ws"
+
+    def _resolve_token(self) -> str:
+        """Resolve authentication token.
+
+        DEBUG_WSS=true → 固定 Token "debug-token-fixed"
+        否则           → 从 SECRET_KEY 环境变量读取
+        """
+        is_debug_wss = os.getenv("DEBUG_WSS", "false").lower() in ("true", "1", "yes")
+        if is_debug_wss:
+            return "debug-token-fixed"
+        return os.getenv("SECRET_KEY", "")
+
+    # ------------------------------------------------------------------
     # Connection loop
     # ------------------------------------------------------------------
 
     async def _connect_loop(self) -> None:
-        """Main loop: connect, then run heartbeat + receive until disconnect."""
+        """Main loop: connect, authenticate, then run heartbeat + receive until disconnect."""
         while self._running:
             try:
                 await self._connect()
                 self._backoff = _INITIAL_BACKOFF  # reset on success
-                # Run heartbeat concurrently with message receive
+
+                # 认证阶段
+                authenticated = await self._authenticate()
+                if not authenticated:
+                    # 认证失败 — 断开并重连
+                    await self._disconnect()
+                    if self._running:
+                        await asyncio.sleep(self._backoff)
+                        self._backoff = min(
+                            self._backoff * _BACKOFF_MULTIPLIER,
+                            _MAX_BACKOFF,
+                        )
+                    continue
+
+                # 认证成功 — 进入心跳 + 指令收发
                 async with asyncio.TaskGroup() as tg:
                     tg.create_task(self._heartbeat_loop())
                     tg.create_task(self._receive_loop())
@@ -130,10 +191,11 @@ class WssClient:
 
     async def _connect(self) -> None:
         """Establish a single WebSocket connection."""
-        logger.info("WSS connecting to %s", self._url)
+        url = self._resolve_url()
+        logger.info("WSS connecting to %s", url)
         # Disable SSL verification for self-signed certs in dev
         ssl_context = None
-        if "wss://" in self._url:
+        if "wss://" in url:
             import ssl
             ssl_context = ssl.create_default_context()
             # Allow self-signed certs in debug mode
@@ -142,7 +204,7 @@ class WssClient:
                 ssl_context.verify_mode = ssl.CERT_NONE
 
         self._ws = await websockets.connect(
-            self._url,
+            url,
             ssl=ssl_context if ssl_context else None,
             ping_interval=None,  # we handle heartbeat ourselves
         )
@@ -150,8 +212,10 @@ class WssClient:
         logger.info("WSS connected")
 
     async def _disconnect(self) -> None:
-        """Close the WebSocket connection gracefully."""
+        """Close the WebSocket connection and reset auth state."""
         self._connected = False
+        self._auth_status = AuthStatus.PENDING
+        self._node_id = None
         if self._ws:
             try:
                 await self._ws.close()
@@ -160,16 +224,88 @@ class WssClient:
             self._ws = None
 
     # ------------------------------------------------------------------
+    # Authentication
+    # ------------------------------------------------------------------
+
+    async def _authenticate(self) -> bool:
+        """Send auth message and wait for auth_ack.
+
+        Reads from the websocket directly until auth_ack, auth_error, or timeout.
+        Non-auth messages received during this phase are buffered and re-dispatched
+        after authentication completes.
+        """
+        self._auth_status = AuthStatus.PENDING
+        self._node_id = None
+
+        token = self._resolve_token()
+        await self._send({"type": NodeResponse.AUTH, "token": token})
+        logger.info("WSS auth sent (token: %s...)", token[:8] if len(token) > 8 else token)
+
+        # 自己读 websocket 直到收到 auth_ack / auth_error / 超时
+        # （_receive_loop 还没启动，不能依赖它）
+        deadline = asyncio.get_event_loop().time() + _AUTH_TIMEOUT
+        buffered: list[dict[str, Any]] = []
+
+        while self._connected and self._ws:
+            remaining = deadline - asyncio.get_event_loop().time()
+            if remaining <= 0:
+                logger.error("WSS authentication timed out after %ss", _AUTH_TIMEOUT)
+                self._auth_status = AuthStatus.REJECTED
+                return False
+
+            try:
+                raw = await asyncio.wait_for(self._ws.recv(), timeout=min(remaining, 1.0))
+            except asyncio.TimeoutError:
+                continue  # 重新检查 deadline
+            except websockets.exceptions.ConnectionClosed:
+                logger.warning("WSS connection closed during authentication")
+                self._auth_status = AuthStatus.REJECTED
+                self._connected = False
+                return False
+
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                logger.warning("WSS received invalid JSON during auth: %s", raw[:200])
+                continue
+
+            msg_type = data.get("type", "")
+
+            if msg_type == NodeResponse.AUTH_ACK:
+                self._node_id = data.get("node_id", "")
+                self._auth_status = AuthStatus.AUTHENTICATED
+                logger.info("WSS authenticated, NodeID: %s", self._node_id)
+                # 将缓冲的非认证消息交给 handler 处理
+                for buffered_msg in buffered:
+                    try:
+                        await self._handler(buffered_msg)
+                    except Exception:
+                        logger.exception("WSS handler failed for buffered message")
+                return True
+
+            if msg_type == NodeResponse.AUTH_ERROR:
+                self._auth_status = AuthStatus.REJECTED
+                logger.warning(
+                    "WSS auth rejected: %s",
+                    data.get("message", "unknown reason"),
+                )
+                return False
+
+            # 非认证消息：缓冲起来，等认证成功后交给 handler
+            logger.debug("WSS buffering non-auth message during authentication: %s", msg_type or data.get("command", "unknown"))
+            buffered.append(data)
+
+    # ------------------------------------------------------------------
     # Heartbeat
     # ------------------------------------------------------------------
 
     async def _heartbeat_loop(self) -> None:
-        """Send periodic heartbeat pings."""
+        """Send periodic heartbeat pings. Only runs after authentication."""
         while self._connected and self._running:
             await asyncio.sleep(_HEARTBEAT_INTERVAL)
-            if self._connected and self._ws:
+            if self._connected and self._ws and self._auth_status == AuthStatus.AUTHENTICATED:
                 try:
-                    await self._send({"type": "heartbeat"})
+                    await self._send({"type": NodeResponse.HEARTBEAT})
                 except Exception:
                     logger.warning("Heartbeat send failed, connection may be dead")
                     break
@@ -179,7 +315,11 @@ class WssClient:
     # ------------------------------------------------------------------
 
     async def _receive_loop(self) -> None:
-        """Receive messages and dispatch to handler."""
+        """Receive messages and dispatch to the registered handler.
+
+        Only runs after successful authentication — auth messages are handled
+        directly by _authenticate().
+        """
         while self._connected and self._running and self._ws:
             try:
                 raw = await self._ws.recv()
@@ -215,8 +355,11 @@ class WssClient:
             await self._ws.send(json.dumps(data))
 
     async def send(self, data: dict[str, Any]) -> bool:
-        """Public send — returns False if not connected."""
+        """Public send — returns False if not connected or not authenticated."""
         if not self._connected or self._ws is None:
+            return False
+        if self._auth_status != AuthStatus.AUTHENTICATED:
+            logger.warning("WSS send blocked: not yet authenticated")
             return False
         try:
             await self._send(data)
@@ -229,9 +372,11 @@ class WssClient:
     # ------------------------------------------------------------------
 
     async def _default_handler(self, data: dict[str, Any]) -> None:
-        """Default message handler — logs and no-ops."""
+        """Default message handler — logs warning when no handler registered."""
         command = data.get("command", "unknown")
-        logger.info("WSS message received (command=%s), no handler registered", command)
+        logger.warning(
+            "WSS received message but no handler registered (command=%s)", command
+        )
 
     # ------------------------------------------------------------------
     # Handler registration

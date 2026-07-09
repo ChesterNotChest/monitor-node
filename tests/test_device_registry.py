@@ -7,7 +7,7 @@ import asyncio
 import pytest
 import pytest_asyncio
 
-from network.api import DeviceItem
+from network.models import DeviceItem
 from services.device_registry import DeviceRegistry
 
 

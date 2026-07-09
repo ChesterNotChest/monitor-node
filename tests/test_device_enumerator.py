@@ -134,7 +134,7 @@ class TestEnumeratorWithMock:
 # ---------------------------------------------------------------------------
 
 def _make_device(device_id, device_type, device_name):
-    from network.api import DeviceItem
+    from network.models import DeviceItem
     return DeviceItem(device_id=device_id, device_type=device_type, device_name=device_name)
 
 

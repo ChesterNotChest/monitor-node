@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 
-from network.api import DeviceItem
+from network.models import DeviceItem
 from services.capture.base import CaptureDriver
 from services.capture.encoder_resolver import get_video_encoder
 
