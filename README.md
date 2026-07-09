@@ -135,6 +135,7 @@ cp .env.example .env
 | 变量 | 说明 | 默认值 |
 |---|---|---|
 | `SERVER_BASE_URL` | Server 主机地址（IP 或域名） | `127.0.0.1` |
+| `WSS_SCHEME` | Server WebSocket 协议，本地 FastAPI 用 `ws`，TLS/nginx 前置时用 `wss` | `ws` |
 | `WSS_PORT` | WSS 连接端口 | `8443` |
 | `RTMP_PORT` | RTMP 推流端口 | `1935` |
 | `DEBUG_WSS` | WSS 调试模式：固定 Token + 本地 ws:// 连接 | `false` |

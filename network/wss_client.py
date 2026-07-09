@@ -131,8 +131,9 @@ class WssClient:
         """Build WSS URL from config fields.
 
         DEBUG_WSS=true → ws://127.0.0.1:{WSS_PORT}/ws
-        否则           → ws://{SERVER_BASE_URL}:{WSS_PORT}/ws
-                        （生产环境通过 nginx 升级为 wss://）
+        否则           → {WSS_SCHEME}://{SERVER_BASE_URL}:{WSS_PORT}/ws
+                        WSS_SCHEME defaults to ws for the current FastAPI
+                        server; set it to wss when fronted by TLS/nginx.
         """
         if self._url:
             return self._url
@@ -140,7 +141,10 @@ class WssClient:
         is_debug_wss = os.getenv("DEBUG_WSS", "false").lower() in ("true", "1", "yes")
         base = "127.0.0.1" if is_debug_wss else os.getenv("SERVER_BASE_URL", "127.0.0.1")
         port = os.getenv("WSS_PORT", "8443")
-        protocol = "ws" if is_debug_wss else "wss"
+        protocol = "ws" if is_debug_wss else os.getenv("WSS_SCHEME", "ws").lower()
+        if protocol not in ("ws", "wss"):
+            logger.warning("Invalid WSS_SCHEME=%s, falling back to ws", protocol)
+            protocol = "ws"
         return f"{protocol}://{base}:{port}/ws"
 
     def _resolve_token(self) -> str:

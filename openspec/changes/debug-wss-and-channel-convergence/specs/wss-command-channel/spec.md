@@ -94,3 +94,19 @@ WSS 作为 Server 与 Node 之间的唯一指令通道。Node 通过 `CommandHan
 ### Requirement: Local WebSocket endpoint WS /api/ws
 **Reason**: 与 REST 端点相同的问题——Server 无法访问 Node 的私有 IP。已被 WSS 指令通道替代。
 **Migration**: 所有指令通过 WSS 客户端（Node 主动连接 Server）下发和响应。
+
+### Requirement: update_stream responses include a message type
+
+Node SHALL include `type: "update_stream_response"` on every response emitted
+for an `UPDATE_STREAM` command. The response SHALL keep the existing
+`success` and `message` fields so Server can validate the command outcome.
+
+#### Scenario: update_stream succeeds
+
+- **WHEN** Node handles `{"command": "UPDATE_STREAM", "device_type": "video", "device_id": 1, "enable": true}`
+- **THEN** Node sends `{"type": "update_stream_response", "success": true, "message": "..."}`
+
+#### Scenario: update_stream fails validation
+
+- **WHEN** Node rejects an `UPDATE_STREAM` command because `device_type` or `device_id` is invalid
+- **THEN** Node sends `{"type": "update_stream_response", "success": false, "message": "..."}`

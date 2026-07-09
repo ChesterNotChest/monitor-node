@@ -44,3 +44,15 @@
 | `services/state_machine.py` | import 路径变更 |
 | `tests/` | 删除 REST/WS 测试；新增 `test_command_handler.py`、`test_wss_integration.py`、`mock_server.js` |
 | `.env` / `.env.example` | 配置字段对齐为 `SERVER_BASE_URL`、`RTMP_PORT`、`RTMP_DEBUG`、`WSS_PORT` |
+
+## Addendum: Dynamic dshow capture options
+
+Windows dshow video capture SHALL no longer hardcode one capture mode for
+every camera. Before starting a video push, Node SHALL probe the selected
+device with ffmpeg dshow `-list_options true`, parse advertised video modes,
+and build the capture command from a compatible size/fps/pixel_format.
+
+This keeps Node as the source of truth for raw device capture while allowing
+different cameras to use their actual supported modes. If probing fails or no
+usable mode is returned, Node SHALL use a conservative fallback of
+`640x480@30`.
