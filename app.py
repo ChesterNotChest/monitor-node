@@ -274,11 +274,14 @@ async def lifespan(app: FastAPI):
             logger.info(
                 "[RTMP_DEBUG] RTMP 服务器已启动: rtmp://127.0.0.1:1935/live"
             )
+            from services.ffmpeg_runner import _build_rtmp_url
             for device in devices:
                 await device_registry.add(device)
+                # 使用与实际推流一致的 URL 格式打印拉流地址
+                actual_url = _build_rtmp_url(device)
                 logger.info(
-                    "[RTMP_DEBUG] 拉流地址: rtmp://127.0.0.1:1935/live/%s",
-                    device.device_id,
+                    "[RTMP_DEBUG] 拉流地址: %s",
+                    actual_url,
                 )
         else:
             logger.warning(
@@ -291,6 +294,20 @@ async def lifespan(app: FastAPI):
     #    WSS is always enabled now — it's the sole command channel
     handler = CommandHandler(wss_client)
     wss_client.set_message_handler(handler.dispatch)
+
+    # 认证成功后自动重启所有运行中的流，使 NodeID 从 "unauthenticated" 更新为真实值
+    async def _on_auth_restart_streams(node_id: str) -> None:
+        running = ffmpeg_runner.list_running()
+        if running:
+            logger.info(
+                "WSS 认证完成 (NodeID=%s)，重启 %d 个运行中的流以更新 RTMP URL",
+                node_id, len(running),
+            )
+            for device_id in list(running):
+                await ffmpeg_runner.stop_stream(device_id)
+            # 状态机在下一个 tick 会自动重启它们，届时 URL 将包含正确的 NodeID
+
+    wss_client.set_on_auth_complete(_on_auth_restart_streams)
     await wss_client.start()
     logger.info(
         "WSS client started (DEBUG_WSS=%s, target=%s)",

@@ -44,6 +44,7 @@ _AUTH_TIMEOUT = 10.0         # seconds to wait for auth_ack
 # ---------------------------------------------------------------------------
 
 MessageHandler = Callable[[dict[str, Any]], Awaitable[None]]
+AuthCallback = Callable[[str], Awaitable[None]]  # node_id → None
 
 # ---------------------------------------------------------------------------
 # Client
@@ -70,6 +71,9 @@ class WssClient:
         # 身份认证状态
         self._node_id: Optional[str] = None
         self._auth_status = AuthStatus.PENDING
+
+        # 认证完成回调（用于 state machine 重启流等场景）
+        self._on_auth_complete: Optional[AuthCallback] = None
 
     # ------------------------------------------------------------------
     # Properties
@@ -281,6 +285,12 @@ class WssClient:
                         await self._handler(buffered_msg)
                     except Exception:
                         logger.exception("WSS handler failed for buffered message")
+                # 通知认证完成（state machine 用此重启流）
+                if self._on_auth_complete and self._node_id:
+                    try:
+                        await self._on_auth_complete(self._node_id)
+                    except Exception:
+                        logger.exception("on_auth_complete callback failed")
                 return True
 
             if msg_type == NodeResponse.AUTH_ERROR:
@@ -385,6 +395,13 @@ class WssClient:
     def set_message_handler(self, handler: MessageHandler) -> None:
         """Replace the message handler at runtime."""
         self._handler = handler
+
+    def set_on_auth_complete(self, callback: AuthCallback) -> None:
+        """Register a callback invoked when WSS authentication succeeds.
+
+        The callback receives the assigned node_id (str).
+        """
+        self._on_auth_complete = callback
 
 
 # ---------------------------------------------------------------------------
