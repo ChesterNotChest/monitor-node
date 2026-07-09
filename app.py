@@ -295,19 +295,22 @@ async def lifespan(app: FastAPI):
     handler = CommandHandler(wss_client)
     wss_client.set_message_handler(handler.dispatch)
 
-    # 认证成功后自动重启所有运行中的流，使 NodeID 从 "unauthenticated" 更新为真实值
-    async def _on_auth_restart_streams(node_id: str) -> None:
+    # 认证成功后自动重启所有运行中的流，使 RTMP URL 包含 Server 侧 device_id
+    # （认证前启动的流使用 device_id=0 占位，认证后 Server 映射表可用）
+    async def _on_auth_restart_streams(session_token: str) -> None:
         running = ffmpeg_runner.list_running()
         if running:
             logger.info(
-                "WSS 认证完成 (NodeID=%s)，重启 %d 个运行中的流以更新 RTMP URL",
-                node_id, len(running),
+                "WSS 认证完成 (session=%s...)，重启 %d 个运行中的流以更新 RTMP URL",
+                session_token[:16] if len(session_token) > 16 else session_token,
+                len(running),
             )
             for device_id in list(running):
                 await ffmpeg_runner.stop_stream(device_id)
-            # 状态机在下一个 tick 会自动重启它们，届时 URL 将包含正确的 NodeID
+            # 状态机在下一个 tick 会自动重启它们，届时 URL 将包含正确的 Server device_id
 
-    wss_client.set_on_auth_complete(_on_auth_restart_streams)
+    # 通过轮询方式在认证后触发重启（wss_client 不再提供回调）
+    wss_client._on_auth_complete = _on_auth_restart_streams
     await wss_client.start()
     logger.info(
         "WSS client started (DEBUG_WSS=%s, target=%s)",

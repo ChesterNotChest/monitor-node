@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from network.models import DeviceItem
-from services.ffmpeg_runner import FfmpegRunner, _build_rtmp_url, _is_debug_mode, _slugify
+from services.ffmpeg_runner import FfmpegRunner, _build_rtmp_url, _is_debug_mode
 
 
 @pytest.fixture
@@ -22,7 +22,7 @@ def cam_device():
     return DeviceItem(
         device_id="cam-01",
         device_type="video",
-        device_name="Test Camera",
+        device_name="Integrated Camera",
     )
 
 
@@ -36,90 +36,45 @@ def audio_device():
 
 
 # ---------------------------------------------------------------------------
-# Slugify
-# ---------------------------------------------------------------------------
-
-
-class TestSlugify:
-    def test_simple_name(self):
-        assert _slugify("Integrated Camera") == "integrated-camera"
-
-    def test_special_characters(self):
-        slug = _slugify("USB2.0 HD UVC WebCam (04f2:b6fb)")
-        # 点号被移除（非单词字符），冒号和括号转为连字符
-        assert "usb20" in slug
-        assert "04f2" in slug
-        assert "b6fb" in slug
-        assert "(" not in slug
-        assert ")" not in slug
-
-    def test_spaces_to_hyphens(self):
-        assert _slugify("a b  c   d") == "a-b-c-d"
-
-    def test_preserves_chinese(self):
-        slug = _slugify("摄像头")
-        assert "摄像头" in slug
-
-    def test_empty_yields_unknown(self):
-        assert _slugify("") == "unknown"
-
-    def test_only_special_chars(self):
-        assert _slugify("()[]") == "unknown"
-
-
-# ---------------------------------------------------------------------------
 # RTMP URL construction
 # ---------------------------------------------------------------------------
 
 
 class TestRtmpUrl:
-    def test_url_format(self, monkeypatch, cam_device):
-        """RTMP URL 使用新格式。"""
+    def test_url_format_with_server_mapping(self, monkeypatch, cam_device):
+        """RTMP URL 使用 {device_name}_{device_type}_{device_id} 格式，空格→下划线。"""
         monkeypatch.setenv("RTMP_DEBUG", "false")
         monkeypatch.setenv("SERVER_BASE_URL", "192.168.1.100")
         monkeypatch.setenv("RTMP_PORT", "1935")
 
-        # 模拟 wss_client.node_id — 需要 patch 到 network.wss_client 模块
-        with patch("network.wss_client.wss_client") as mock_wss:
-            mock_wss.node_id = "node-abc123"
-            url = _build_rtmp_url(cam_device)
-
-        assert url == "rtmp://192.168.1.100:1935/live/node-abc123_video_test-camera"
+        url = _build_rtmp_url(cam_device, server_device_id=1)
+        assert url == "rtmp://192.168.1.100:1935/live/Integrated_Camera_video_1"
 
     def test_url_debug_mode(self, monkeypatch, cam_device):
         """RTMP_DEBUG 时强制 127.0.0.1。"""
         monkeypatch.setenv("RTMP_DEBUG", "true")
         monkeypatch.setenv("RTMP_PORT", "1935")
 
-        with patch("network.wss_client.wss_client") as mock_wss:
-            mock_wss.node_id = "debug-node-001"
-            url = _build_rtmp_url(cam_device)
-
-        assert url.startswith("rtmp://127.0.0.1:1935/live/debug-node-001_video_")
+        url = _build_rtmp_url(cam_device, server_device_id=1)
+        assert url.startswith("rtmp://127.0.0.1:1935/live/Integrated_Camera_video_")
 
     def test_url_audio_device(self, monkeypatch, audio_device):
-        """音频设备 URL 包含 audio 类型。"""
+        """音频设备 URL 包含 audio 类型，空格→下划线。"""
         monkeypatch.setenv("RTMP_DEBUG", "false")
         monkeypatch.setenv("SERVER_BASE_URL", "server.local")
         monkeypatch.setenv("RTMP_PORT", "1935")
 
-        with patch("network.wss_client.wss_client") as mock_wss:
-            mock_wss.node_id = "node-1"
-            url = _build_rtmp_url(audio_device)
+        url = _build_rtmp_url(audio_device, server_device_id=2)
+        assert "Microphone_Array_audio_2" in url
 
-        assert "_audio_" in url
-
-    def test_url_unauthenticated_node(self, monkeypatch, cam_device):
-        """未认证时使用 'unauthenticated' 占位。"""
+    def test_url_zero_device_id(self, monkeypatch, cam_device):
+        """未映射时使用 device_id=0 占位。"""
         monkeypatch.setenv("RTMP_DEBUG", "false")
         monkeypatch.setenv("SERVER_BASE_URL", "192.168.1.100")
         monkeypatch.setenv("RTMP_PORT", "1935")
 
-        with patch("network.wss_client.wss_client") as mock_wss:
-            mock_wss.node_id = None
-            url = _build_rtmp_url(cam_device)
-
-        assert "unauthenticated_video_" in url
+        url = _build_rtmp_url(cam_device)
+        assert "_video_0" in url
 
 
 # ---------------------------------------------------------------------------
@@ -161,10 +116,8 @@ class TestStartStop:
         mock_proc = AsyncMock()
         mock_proc.returncode = None
 
-        with patch("network.wss_client.wss_client") as mock_wss:
-            mock_wss.node_id = "test-node"
-            with patch.object(asyncio, "create_subprocess_exec", return_value=mock_proc) as mock_exec:
-                proc = await runner.start_stream(cam_device)
+        with patch.object(asyncio, "create_subprocess_exec", return_value=mock_proc) as mock_exec:
+            proc = await runner.start_stream(cam_device)
 
         mock_exec.assert_called_once()
         assert proc is mock_proc

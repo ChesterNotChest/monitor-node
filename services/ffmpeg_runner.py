@@ -3,7 +3,8 @@
 Platform-specific command building is delegated to ``services.capture`` drivers.
 This module handles process start / stop / query / cleanup.
 
-RTMP URL format: rtmp://{SERVER_BASE_URL}:{RTMP_PORT}/live/{nodeid}_{device_type}_{device_name_slug}
+RTMP URL format: rtmp://{SERVER_BASE_URL}:{RTMP_PORT}/live/{device_name}_{device_type}_{device_id}
+（对齐 Server 侧的拉流路径格式）
 """
 
 from __future__ import annotations
@@ -11,43 +12,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import re
 import sys
 from typing import Optional
 
-from network.models import DeviceItem
+from network.models import DeviceItem, get_server_device_id
 from services.capture import get_capture_driver
 
 logger = logging.getLogger(__name__)
 
 _STOP_TIMEOUT = 5  # seconds to wait after terminate()
-
-
-def _slugify(name: str) -> str:
-    """将设备名称转为 URL-safe slug。
-
-    规则:
-      - 空格转连字符
-      - 仅保留字母、数字、连字符、下划线
-      - 保留中文字符（FFmpeg 支持 UTF-8 URL）
-      - 连续连字符合并为一个
-
-    >>> _slugify("Integrated Camera")
-    'integrated-camera'
-    >>> _slugify("USB2.0 HD UVC WebCam (04f2:b6fb)")
-    'usb2-0-hd-uvc-webcam-04f2-b6fb'
-    """
-    # 转小写
-    slug = name.lower()
-    # 括号/空格/特殊分隔符 → 连字符
-    slug = re.sub(r'[\s()（）\[\]{}:]+', '-', slug)
-    # 移除其余非允许字符（保留字母、数字、连字符、下划线、中文）
-    slug = re.sub(r'[^\w\-一-鿿]', '', slug)
-    # 合并连续连字符
-    slug = re.sub(r'-{2,}', '-', slug)
-    # 去除首尾连字符
-    slug = slug.strip('-')
-    return slug or "unknown"
 
 
 def _is_debug_mode() -> bool:
@@ -66,27 +39,33 @@ def _resolve_rtmp_host() -> str:
     return os.getenv("SERVER_BASE_URL", "127.0.0.1")
 
 
-def _build_rtmp_url(device: DeviceItem) -> str:
-    """按规范格式构造 RTMP 推流地址。
+def _build_rtmp_url(device: DeviceItem, server_device_id: int = 0) -> str:
+    """按 Server 协议构造 RTMP 推流地址。
 
-    格式: rtmp://{host}:{port}/live/{nodeid}_{device_type}_{device_name_slug}
+    格式: rtmp://{host}:{port}/live/{device_name}_{device_type}_{device_id}
 
-    若 node_id 尚未分配（WSS 未认证），使用 "unauthenticated" 占位。
+    - device_name 中的空格替换为下划线，避免 RTMP URL 解析问题
+    - device_id 优先从 Server 映射表查，未映射时使用 0 占位
     """
-    from network.wss_client import wss_client
-
     host = _resolve_rtmp_host()
     port = os.getenv("RTMP_PORT", "1935")
-    node_id = wss_client.node_id or "unauthenticated"
     device_type = device.device_type or "unknown"
-    name_slug = _slugify(device.device_name)
+    # 空格 → 下划线，保留其他字符
+    url_name = device.device_name.replace(" ", "_")
 
-    if node_id == "unauthenticated":
+    # 优先从 Server 映射表获取 device_id
+    if server_device_id == 0:
+        mapped_id = get_server_device_id(device_type, device.device_name)
+        if mapped_id is not None:
+            server_device_id = mapped_id
+
+    if server_device_id == 0:
         logger.warning(
-            "RTMP URL 使用未认证 NodeID — WSS 认证尚未完成，流可能无法被 Server 识别"
+            "RTMP URL 使用 device_id=0（占位）— Server 映射表中未找到设备 %s (%s)",
+            device.device_name, device_type,
         )
 
-    return f"rtmp://{host}:{port}/live/{node_id}_{device_type}_{name_slug}"
+    return f"rtmp://{host}:{port}/live/{url_name}_{device_type}_{server_device_id}"
 
 
 class FfmpegRunner:

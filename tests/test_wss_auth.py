@@ -1,4 +1,4 @@
-"""Unit tests for WSS client authentication flow."""
+"""Unit tests for WSS client authentication flow (Server-aligned protocol)."""
 
 from __future__ import annotations
 
@@ -9,7 +9,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 import websockets
 
-from constant import AuthStatus, NodeResponse
+from constant import AuthStatus
+from network.models import clear_server_device_maps
 from network.wss_client import WssClient
 
 
@@ -47,11 +48,9 @@ class TestUrlResolution:
         """DEBUG_WSS 时使用 ws://127.0.0.1:{WSS_PORT}/ws。"""
         monkeypatch.setenv("DEBUG_WSS", "true")
         monkeypatch.setenv("WSS_PORT", "9443")
-        # 不传 url 参数，让 _resolve_url 从环境变量构建
         client = WssClient()
         url = client._resolve_url()
         assert url == "ws://127.0.0.1:9443/ws"
-        assert url.startswith("ws://")
 
     def test_production_url(self, monkeypatch):
         """非 DEBUG_WSS 时使用 wss://{SERVER_BASE_URL}:{WSS_PORT}/ws。"""
@@ -70,15 +69,18 @@ class TestUrlResolution:
 
 class TestAuthenticate:
     @pytest.mark.asyncio
-    async def test_authenticate_sends_token_and_reads_auth_ack(self, wss_client, monkeypatch):
-        """_authenticate 发送 auth，自己读 websocket 收到 auth_ack 后返回 True。"""
+    async def test_sends_token_and_receives_session(self, wss_client, monkeypatch):
+        """_authenticate 发送 {"token":"xxx"}，接收 session_token + device maps。"""
         monkeypatch.setenv("DEBUG_WSS", "true")
 
         mock_ws = AsyncMock()
         mock_ws.send = AsyncMock()
-        # recv 先返回 auth_ack，然后连接关闭
         mock_ws.recv = AsyncMock(side_effect=[
-            json.dumps({"type": NodeResponse.AUTH_ACK, "node_id": "test-node"}),
+            json.dumps({
+                "session_token": "sess-test-123",
+                "videos": [{"id": 1, "name": "Integrated Camera"}],
+                "audios": [{"id": 2, "name": "Microphone Array"}],
+            }),
             websockets.exceptions.ConnectionClosed(None, None),
         ])
         wss_client._ws = mock_ws
@@ -87,41 +89,20 @@ class TestAuthenticate:
         result = await wss_client._authenticate()
 
         assert result is True
-        assert wss_client._node_id == "test-node"
+        assert wss_client._session_token == "sess-test-123"
         assert wss_client._auth_status == AuthStatus.AUTHENTICATED
-        # 验证发送了 auth 消息
+        # 验证发送了 token 消息（无 type 包装）
         assert mock_ws.send.called
         sent = json.loads(mock_ws.send.call_args[0][0])
-        assert sent["type"] == NodeResponse.AUTH
-        assert sent["token"] == "debug-token-fixed"
-
-    @pytest.mark.asyncio
-    async def test_authenticate_receives_auth_error(self, wss_client, monkeypatch):
-        """_authenticate 收到 auth_error 返回 False。"""
-        monkeypatch.setenv("DEBUG_WSS", "true")
-
-        mock_ws = AsyncMock()
-        mock_ws.send = AsyncMock()
-        mock_ws.recv = AsyncMock(return_value=json.dumps({
-            "type": NodeResponse.AUTH_ERROR,
-            "message": "invalid token",
-        }))
-        wss_client._ws = mock_ws
-        wss_client._connected = True
-
-        result = await wss_client._authenticate()
-
-        assert result is False
-        assert wss_client._auth_status == AuthStatus.REJECTED
+        assert sent == {"token": "debug-token-fixed"}
 
     @pytest.mark.asyncio
     async def test_authenticate_timeout(self, wss_client, monkeypatch):
-        """recv 持续超时 → 10s 后认证超时返回 False。"""
+        """recv 持续超时 → 认证超时返回 False。"""
         monkeypatch.setenv("DEBUG_WSS", "true")
 
         mock_ws = AsyncMock()
         mock_ws.send = AsyncMock()
-        # recv 永远超时（每个 1s 等待都超时）
         mock_ws.recv = AsyncMock(side_effect=asyncio.TimeoutError())
         wss_client._ws = mock_ws
         wss_client._connected = True
@@ -133,8 +114,8 @@ class TestAuthenticate:
         assert wss_client._auth_status == AuthStatus.REJECTED
 
     @pytest.mark.asyncio
-    async def test_authenticate_buffers_non_auth_messages(self, wss_client, monkeypatch):
-        """认证期间收到的非 auth 消息被缓冲，认证后交给 handler。"""
+    async def test_authenticate_buffers_non_auth(self, wss_client, monkeypatch):
+        """认证期间收到的非 session_token 消息被缓冲，认证后交给 handler。"""
         monkeypatch.setenv("DEBUG_WSS", "true")
 
         received = []
@@ -147,8 +128,8 @@ class TestAuthenticate:
         mock_ws = AsyncMock()
         mock_ws.send = AsyncMock()
         mock_ws.recv = AsyncMock(side_effect=[
-            json.dumps({"command": "get_devices", "node_id": "n1"}),
-            json.dumps({"type": NodeResponse.AUTH_ACK, "node_id": "test-node"}),
+            json.dumps({"command": "UPDATE_STREAM", "device_type": "video", "device_id": 1, "enable": True}),
+            json.dumps({"session_token": "sess-test", "videos": [], "audios": []}),
             websockets.exceptions.ConnectionClosed(None, None),
         ])
         wss_client._ws = mock_ws
@@ -157,9 +138,8 @@ class TestAuthenticate:
         result = await wss_client._authenticate()
 
         assert result is True
-        # 缓冲的命令在认证成功后分派给了 handler
         assert len(received) == 1
-        assert received[0]["command"] == "get_devices"
+        assert received[0]["command"] == "UPDATE_STREAM"
 
 
 # ---------------------------------------------------------------------------
@@ -170,8 +150,8 @@ class TestAuthenticate:
 class TestDisconnectClearsAuth:
     @pytest.mark.asyncio
     async def test_disconnect_resets_auth(self, wss_client):
-        """断连时清除 node_id 和 auth_status。"""
-        wss_client._node_id = "some-node"
+        """断连时清除 session_token 和 auth_status。"""
+        wss_client._session_token = "some-session"
         wss_client._auth_status = AuthStatus.AUTHENTICATED
         wss_client._connected = True
         wss_client._ws = AsyncMock()
@@ -179,7 +159,7 @@ class TestDisconnectClearsAuth:
 
         await wss_client._disconnect()
 
-        assert wss_client._node_id is None
+        assert wss_client._session_token is None
         assert wss_client._auth_status == AuthStatus.PENDING
         assert wss_client._connected is False
 

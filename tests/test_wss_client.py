@@ -24,7 +24,7 @@ def authenticated_client(wss_client):
     """WSS client in authenticated state."""
     wss_client._connected = True
     wss_client._auth_status = AuthStatus.AUTHENTICATED
-    wss_client._node_id = "test-node-001"
+    wss_client._session_token = "sess-test-001"
     return wss_client
 
 
