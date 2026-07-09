@@ -9,7 +9,7 @@ import shutil
 import sys
 from typing import Optional
 
-from network.api import DeviceItem
+from network.models import DeviceItem
 from services.capture import get_capture_driver
 
 logger = logging.getLogger(__name__)

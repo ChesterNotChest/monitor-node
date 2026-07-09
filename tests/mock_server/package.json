@@ -1,0 +1,13 @@
+{
+  "name": "monitor-node-mock-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "假 WSS 服务器——用于 DEBUG_WSS 模式下本地开发调试",
+  "main": "mock_server.js",
+  "scripts": {
+    "start": "node mock_server.js"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  }
+}

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from network.api import DeviceItem
+from network.models import DeviceItem
 
 
 class CaptureDriver(ABC):

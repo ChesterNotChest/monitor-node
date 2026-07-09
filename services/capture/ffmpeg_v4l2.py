@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from network.api import DeviceItem
+from network.models import DeviceItem
 from services.capture.base import CaptureDriver
 
 _DEVICE_LINE = re.compile(r'\[video4linux2[^\]]*\]\s*(/dev/\S+)\s*:\s*(.+)')

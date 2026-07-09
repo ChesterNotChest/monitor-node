@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 from typing import Optional
 
-from network.api import DeviceItem
+from network.models import DeviceItem
 
 
 class DeviceRegistry:

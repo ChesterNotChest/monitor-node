@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from network.api import DeviceItem
+from network.models import DeviceItem
 from services.capture.base import CaptureDriver
 from services.capture.encoder_resolver import get_audio_encoder, get_video_encoder
 

@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from network.api import DeviceItem
+from network.models import DeviceItem
 from services.device_registry import DeviceRegistry
 from services.ffmpeg_runner import FfmpegRunner
 from services.state_machine import StreamStateMachine
