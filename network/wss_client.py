@@ -1,17 +1,23 @@
 """WSS Client — persistent WebSocket connection to remote Server.
 
 Features:
-- Token-based identity authentication (auth → auth_ack → NodeID)
+- Token-based identity authentication (token → session_token + device maps)
 - Exponential backoff reconnection (1s → 2s → 4s → … max 60s)
 - Heartbeat every 30s (only after successful authentication)
 - Message dispatch by ``command`` field after authentication
 - DEBUG_WSS mode: fixed token, local non-encrypted WebSocket
 
+Protocol (aligned with Server's node-wss-connection spec):
+  Node → Server:  {"token": "xxx"}
+  Server → Node:  {"session_token": "sess_xxx", "videos": [...], "audios": [...]}
+  Server → Node:  {"command": "UPDATE_STREAM", "device_type": "video", "device_id": 1, "enable": true}
+  Node → Server:  {"success": true, "message": null}
+
 Usage::
 
     client = WssClient()
     await client.start()
-    # After auth completes, client.node_id is available
+    # After auth completes, client.session_token and device maps are available
 """
 
 from __future__ import annotations
@@ -25,7 +31,8 @@ from typing import Any, Awaitable, Callable, Optional
 import websockets
 import websockets.exceptions
 
-from constant import AuthStatus, NodeResponse
+from constant import AuthStatus
+from network.models import clear_server_device_maps, set_server_device_maps
 
 logger = logging.getLogger(__name__)
 
@@ -37,14 +44,13 @@ _HEARTBEAT_INTERVAL = 30     # seconds
 _INITIAL_BACKOFF = 1.0       # seconds
 _MAX_BACKOFF = 60.0          # seconds
 _BACKOFF_MULTIPLIER = 2.0
-_AUTH_TIMEOUT = 10.0         # seconds to wait for auth_ack
+_AUTH_TIMEOUT = 10.0         # seconds to wait for auth response
 
 # ---------------------------------------------------------------------------
 # Types
 # ---------------------------------------------------------------------------
 
 MessageHandler = Callable[[dict[str, Any]], Awaitable[None]]
-AuthCallback = Callable[[str], Awaitable[None]]  # node_id → None
 
 # ---------------------------------------------------------------------------
 # Client
@@ -69,11 +75,11 @@ class WssClient:
         self._backoff = _INITIAL_BACKOFF
 
         # 身份认证状态
-        self._node_id: Optional[str] = None
+        self._session_token: Optional[str] = None
         self._auth_status = AuthStatus.PENDING
 
-        # 认证完成回调（用于 state machine 重启流等场景）
-        self._on_auth_complete: Optional[AuthCallback] = None
+        # 认证完成回调（auth 成功后触发，用于重启流等）
+        self._on_auth_complete: Optional[Callable[[str], Awaitable[None]]] = None
 
     # ------------------------------------------------------------------
     # Properties
@@ -88,9 +94,9 @@ class WssClient:
         return self._auth_status == AuthStatus.AUTHENTICATED
 
     @property
-    def node_id(self) -> Optional[str]:
-        """Server 分配的 NodeID，认证成功后方可用。"""
-        return self._node_id
+    def session_token(self) -> Optional[str]:
+        """Server 分配的 session_token，认证成功后方可用。"""
+        return self._session_token
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -219,7 +225,8 @@ class WssClient:
         """Close the WebSocket connection and reset auth state."""
         self._connected = False
         self._auth_status = AuthStatus.PENDING
-        self._node_id = None
+        self._session_token = None
+        clear_server_device_maps()
         if self._ws:
             try:
                 await self._ws.close()
@@ -232,21 +239,23 @@ class WssClient:
     # ------------------------------------------------------------------
 
     async def _authenticate(self) -> bool:
-        """Send auth message and wait for auth_ack.
+        """Send token and wait for session_token + device maps.
 
-        Reads from the websocket directly until auth_ack, auth_error, or timeout.
-        Non-auth messages received during this phase are buffered and re-dispatched
-        after authentication completes.
+        Protocol (aligned with Server):
+          Node → Server:  {"token": "xxx"}
+          Server → Node:  {"session_token": "sess_xxx", "videos": [...], "audios": [...]}
+
+        Reads from the websocket directly until response or timeout.
+        Non-auth messages received during this phase are buffered.
         """
         self._auth_status = AuthStatus.PENDING
-        self._node_id = None
+        self._session_token = None
 
         token = self._resolve_token()
-        await self._send({"type": NodeResponse.AUTH, "token": token})
+        # 认证消息格式对齐 Server：{"token": "xxx"}（无 type 包装）
+        await self._send({"token": token})
         logger.info("WSS auth sent (token: %s...)", token[:8] if len(token) > 8 else token)
 
-        # 自己读 websocket 直到收到 auth_ack / auth_error / 超时
-        # （_receive_loop 还没启动，不能依赖它）
         deadline = asyncio.get_event_loop().time() + _AUTH_TIMEOUT
         buffered: list[dict[str, Any]] = []
 
@@ -260,7 +269,7 @@ class WssClient:
             try:
                 raw = await asyncio.wait_for(self._ws.recv(), timeout=min(remaining, 1.0))
             except asyncio.TimeoutError:
-                continue  # 重新检查 deadline
+                continue
             except websockets.exceptions.ConnectionClosed:
                 logger.warning("WSS connection closed during authentication")
                 self._auth_status = AuthStatus.REJECTED
@@ -273,37 +282,45 @@ class WssClient:
                 logger.warning("WSS received invalid JSON during auth: %s", raw[:200])
                 continue
 
-            msg_type = data.get("type", "")
-
-            if msg_type == NodeResponse.AUTH_ACK:
-                self._node_id = data.get("node_id", "")
+            # Server 认证成功响应：{"session_token": "...", "videos": [...], "audios": [...]}
+            if "session_token" in data:
+                self._session_token = data["session_token"]
                 self._auth_status = AuthStatus.AUTHENTICATED
-                logger.info("WSS authenticated, NodeID: %s", self._node_id)
+
+                # 填充 Server 设备映射表
+                videos = data.get("videos", [])
+                audios = data.get("audios", [])
+                set_server_device_maps(videos, audios)
+
+                logger.info(
+                    "WSS authenticated, session_token=%s, videos=%d, audios=%d",
+                    self._session_token[:16] + "..." if len(self._session_token) > 16 else self._session_token,
+                    len(videos),
+                    len(audios),
+                )
+
                 # 将缓冲的非认证消息交给 handler 处理
                 for buffered_msg in buffered:
                     try:
                         await self._handler(buffered_msg)
                     except Exception:
                         logger.exception("WSS handler failed for buffered message")
-                # 通知认证完成（state machine 用此重启流）
-                if self._on_auth_complete and self._node_id:
+                # 通知认证完成（app.py 用此重启流）
+                if self._on_auth_complete and self._session_token:
                     try:
-                        await self._on_auth_complete(self._node_id)
+                        await self._on_auth_complete(self._session_token)
                     except Exception:
                         logger.exception("on_auth_complete callback failed")
                 return True
 
-            if msg_type == NodeResponse.AUTH_ERROR:
-                self._auth_status = AuthStatus.REJECTED
-                logger.warning(
-                    "WSS auth rejected: %s",
-                    data.get("message", "unknown reason"),
-                )
-                return False
-
             # 非认证消息：缓冲起来，等认证成功后交给 handler
-            logger.debug("WSS buffering non-auth message during authentication: %s", msg_type or data.get("command", "unknown"))
+            logger.debug(
+                "WSS buffering non-auth message during authentication: %s",
+                data.get("command", data.get("type", "unknown")),
+            )
             buffered.append(data)
+
+        return False
 
     # ------------------------------------------------------------------
     # Heartbeat
@@ -315,7 +332,7 @@ class WssClient:
             await asyncio.sleep(_HEARTBEAT_INTERVAL)
             if self._connected and self._ws and self._auth_status == AuthStatus.AUTHENTICATED:
                 try:
-                    await self._send({"type": NodeResponse.HEARTBEAT})
+                    await self._send({"type": "heartbeat"})
                 except Exception:
                     logger.warning("Heartbeat send failed, connection may be dead")
                     break
@@ -395,13 +412,6 @@ class WssClient:
     def set_message_handler(self, handler: MessageHandler) -> None:
         """Replace the message handler at runtime."""
         self._handler = handler
-
-    def set_on_auth_complete(self, callback: AuthCallback) -> None:
-        """Register a callback invoked when WSS authentication succeeds.
-
-        The callback receives the assigned node_id (str).
-        """
-        self._on_auth_complete = callback
 
 
 # ---------------------------------------------------------------------------
