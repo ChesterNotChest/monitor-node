@@ -131,6 +131,7 @@ class CommandHandler:
     async def _send_response(self, success: bool, message: str | None) -> None:
         """发送对齐 Server 协议的响应。"""
         await self._wss.send({
+            "type": "update_stream_response",
             "success": success,
             "message": message,
         })

@@ -99,6 +99,7 @@ class TestDispatch:
 
         assert len(mock_wss.sent_messages) == 1
         resp = mock_wss.sent_messages[0]
+        assert resp["type"] == "update_stream_response"
         assert resp["success"] is True
         assert "推流已启动" in resp["message"]
 
@@ -114,6 +115,7 @@ class TestDispatch:
 
         assert len(mock_wss.sent_messages) == 1
         resp = mock_wss.sent_messages[0]
+        assert resp["type"] == "update_stream_response"
         assert resp["success"] is True
         assert resp["message"] == "推流已停止"
 
@@ -124,6 +126,7 @@ class TestDispatch:
 
         assert len(mock_wss.sent_messages) == 1
         resp = mock_wss.sent_messages[0]
+        assert resp["type"] == "update_stream_response"
         assert resp["success"] is False
         assert "unknown command" in resp["message"]
 
@@ -147,6 +150,7 @@ class TestHandleUpdateStream:
         })
 
         resp = mock_wss.sent_messages[0]
+        assert resp["type"] == "update_stream_response"
         assert resp["success"] is True
         assert resp["message"] == "推流已启动"
 
@@ -161,6 +165,7 @@ class TestHandleUpdateStream:
         })
 
         resp = mock_wss.sent_messages[0]
+        assert resp["type"] == "update_stream_response"
         assert resp["success"] is True
 
     @pytest.mark.asyncio
@@ -174,6 +179,7 @@ class TestHandleUpdateStream:
         })
 
         resp = mock_wss.sent_messages[0]
+        assert resp["type"] == "update_stream_response"
         assert resp["success"] is False
         assert "unknown device_id" in resp["message"]
 
@@ -188,6 +194,7 @@ class TestHandleUpdateStream:
         })
 
         resp = mock_wss.sent_messages[0]
+        assert resp["type"] == "update_stream_response"
         assert resp["success"] is False
         assert "invalid device_type" in resp["message"]
 
@@ -210,4 +217,5 @@ class TestHandleUpdateStream:
         })
 
         resp = mock_wss.sent_messages[0]
+        assert resp["type"] == "update_stream_response"
         assert resp["success"] is True

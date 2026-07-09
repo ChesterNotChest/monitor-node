@@ -86,3 +86,35 @@
 - [x] 10.3 手动验证：在 DEBUG_WSS + RTMP_DEBUG 模式下确认 RTMP URL 格式正确
 - [x] 10.4 更新 `README.md`：反映新的配置字段和启动方式
 - [x] 10.5 归档或删除 `openspec/changes/replace-rest-with-wss/`（被本变更完全取代）
+
+## 11. WSS response classification
+
+- [x] 11.1 Node includes `type: "update_stream_response"` on `UPDATE_STREAM` command responses.
+- [x] 11.2 Node keeps the existing `success` and `message` fields for Server validation compatibility.
+- [x] 11.3 Tests assert the typed response payload.
+
+## 12. Windows dshow dynamic capture options
+
+- [x] 12.1 Parse ffmpeg dshow `-list_options true` video option output.
+- [x] 12.2 Select a compatible video capture mode per device, preferring stable
+  pixel formats and common low-latency resolutions.
+- [x] 12.3 Build the dshow video capture command with the selected
+  `-video_size`, `-framerate`, and input pixel format when available.
+- [x] 12.4 Fall back to `640x480@30` when option probing fails or returns no
+  usable modes.
+- [x] 12.5 Add unit tests for option parsing, selection, command generation, and
+  fallback behavior.
+- [x] 12.6 Validate the OpenSpec change and run focused node tests.
+
+## 13. Local server WSS scheme alignment
+
+- [x] 13.1 Add `WSS_SCHEME` so Node can connect to plain local `ws://` FastAPI
+  and still support `wss://` behind TLS/nginx.
+- [x] 13.2 Update WSS URL resolution tests.
+- [x] 13.3 Document the local default in `.env.example` and README.
+
+## 14. RTMP debug startup hardening
+
+- [x] 14.1 Specify that `RTMP_DEBUG=true` startup tolerates embedded RTMP server stdout timeout.
+- [x] 14.2 Initialize the startup stdout line before the timeout read.
+- [x] 14.3 Run node tests and RTMP_DEBUG startup smoke test.

@@ -67,10 +67,12 @@ Node                                    Server
 ### RTMP URL 格式
 
 ```
-rtmp://{SERVER_BASE_URL}:{RTMP_PORT}/live/{nodeid}_{device_type}_{device_name_slug}
+rtmp://{SERVER_BASE_URL}:{RTMP_PORT}/live/{device_name}_{device_type}_{server_device_id}
 ```
 
-示例: `rtmp://192.168.1.100:1935/live/node-abc123_video_integrated-camera`
+`device_name` 中的空格替换为下划线；`server_device_id` 是 Server 数据库中的 video/audio id，未映射时 Node 使用 `0` 占位。
+
+示例: `rtmp://192.168.1.100:1935/live/Integrated_Camera_video_1`
 
 ### 编码器选择
 
@@ -135,6 +137,7 @@ cp .env.example .env
 | 变量 | 说明 | 默认值 |
 |---|---|---|
 | `SERVER_BASE_URL` | Server 主机地址（IP 或域名） | `127.0.0.1` |
+| `WSS_SCHEME` | Server WebSocket 协议，本地 FastAPI 用 `ws`，TLS/nginx 前置时用 `wss` | `ws` |
 | `WSS_PORT` | WSS 连接端口 | `8443` |
 | `RTMP_PORT` | RTMP 推流端口 | `1935` |
 | `DEBUG_WSS` | WSS 调试模式：固定 Token + 本地 ws:// 连接 | `false` |

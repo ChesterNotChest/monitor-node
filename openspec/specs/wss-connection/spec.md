@@ -2,31 +2,69 @@
 
 ## Purpose
 
-Maintain a persistent WebSocket Secure connection from the Node to the Server for receiving commands and reporting status.
+Maintain the persistent WebSocket command channel from Node to Server.
 
 ## Requirements
 
 ### Requirement: Node connects to Server on startup
-Node 启动后 SHALL 在 10 秒内主动向 Server 发起 WebSocket Secure (WSS) 连接。
+
+Node SHALL connect to the configured Server WebSocket endpoint during startup.
+When the connection drops, Node SHALL retry with backoff until the connection is
+restored.
 
 #### Scenario: Successful connection
-- **WHEN** Node 启动且 Server WSS 端点可达
-- **THEN** Node 完成 WSS 握手，连接状态变为 `connected`
 
-#### Scenario: Server unreachable on startup
-- **WHEN** Node 启动但 Server WSS 端点不可达
-- **THEN** Node SHALL 进入指数退避重连模式，首期间隔 1s，上限 60s，无限重试
+- **WHEN** Node starts and the Server WebSocket endpoint is reachable
+- **THEN** Node completes the WebSocket handshake and enters the connected state
 
-### Requirement: Node maintains persistent connection
-WSS 连接 SHALL 保持长连接，Node 通过此连接接收 Server 指令。
+#### Scenario: Server unreachable
 
-#### Scenario: Connection dropped mid-session
-- **WHEN** 已建立的 WSS 连接意外断开（网络波动 / Server 重启）
-- **THEN** Node SHALL 检测断连事件，立即进入重连流程
+- **WHEN** Node starts and the Server WebSocket endpoint is unreachable
+- **THEN** Node retries the connection instead of exiting permanently
+
+### Requirement: Node authenticates and stores Server device mappings
+
+Node SHALL authenticate on the WSS connection with its token. After Server
+accepts the token, Node SHALL store returned device lists as
+`server_device_id -> device_name` mappings, split by device type.
+
+`server_device_id` SHALL mean the Server database id for the corresponding
+`VideoDevice` or `AudioDevice`. This id is the same value Server later sends as
+`device_id` in `UPDATE_STREAM` commands.
+
+#### Scenario: Authentication returns mapped devices
+
+- **WHEN** Server returns `videos: [{id: 1, name: "Integrated Camera"}]`
+- **THEN** Node records `video 1 -> Integrated Camera`
+
+#### Scenario: Authentication returns no mapped devices
+
+- **WHEN** Server returns empty `videos` and `audios` lists
+- **THEN** Node keeps empty mappings and may publish RTMP streams with `server_device_id` placeholder `0`
+
+### Requirement: Node handles update stream commands by Server device id
+
+Node SHALL treat `device_id` in `UPDATE_STREAM` as a Server database id, not as
+a local device id. Node SHALL resolve `device_type + device_id` through the
+stored mapping before matching a local physical device name.
+
+#### Scenario: Start stream command resolves a mapped device
+
+- **WHEN** Node receives `{"command":"UPDATE_STREAM","device_type":"video","device_id":1,"enable":true}`
+- **AND** the mapping contains `video 1 -> Integrated Camera`
+- **THEN** Node enables the local video device named `Integrated Camera`
+
+#### Scenario: Command references an unknown Server device id
+
+- **WHEN** Node receives `UPDATE_STREAM` for a `device_id` absent from the mapping
+- **THEN** Node rejects the command with a failure response
 
 ### Requirement: Node sends heartbeat
-Node SHALL 每 30 秒向 Server 发送心跳消息。
+
+Node SHALL periodically send heartbeat messages over the WSS connection while
+connected.
 
 #### Scenario: Heartbeat
-- **WHEN** 连接处于 `connected` 状态超过 30 秒
-- **THEN** Node 发送 `{"type": "heartbeat"}` 消息
+
+- **WHEN** the WSS connection remains connected for the heartbeat interval
+- **THEN** Node sends `{"type": "heartbeat"}`

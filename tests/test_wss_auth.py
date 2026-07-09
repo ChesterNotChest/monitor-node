@@ -59,6 +59,16 @@ class TestUrlResolution:
         monkeypatch.setenv("WSS_PORT", "8443")
         client = WssClient()
         url = client._resolve_url()
+        assert url == "ws://my-server.example.com:8443/ws"
+
+    def test_production_url_can_use_wss(self, monkeypatch):
+        """Production URL can use wss:// when TLS is configured."""
+        monkeypatch.setenv("DEBUG_WSS", "false")
+        monkeypatch.setenv("SERVER_BASE_URL", "my-server.example.com")
+        monkeypatch.setenv("WSS_PORT", "8443")
+        monkeypatch.setenv("WSS_SCHEME", "wss")
+        client = WssClient()
+        url = client._resolve_url()
         assert url == "wss://my-server.example.com:8443/ws"
 
 

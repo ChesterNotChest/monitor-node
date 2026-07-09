@@ -1,5 +1,20 @@
 # RTMP Streaming (Delta)
 
+## Runtime Hardening Delta
+
+### Requirement: RTMP debug server startup tolerates stdout timeout
+
+When `RTMP_DEBUG=true`, Node SHALL tolerate the embedded RTMP server producing
+no stdout line before the startup read timeout. The startup path SHALL keep the
+RTMP server process alive and SHALL NOT raise an unbound local variable error.
+
+#### Scenario: Embedded RTMP server is quiet during startup
+
+- **WHEN** Node starts with `RTMP_DEBUG=true` and the embedded RTMP server does
+  not emit a startup line before the read timeout
+- **THEN** Node continues startup without crashing
+- **AND** the RTMP server process remains available for local debug streaming
+
 ## MODIFIED Requirements
 
 ### Requirement: Each device gets a dedicated RTMP URL
@@ -38,3 +53,24 @@
 #### Scenario: Start streaming with platform-specific input format
 - **WHEN** 运行在 macOS 且设备 `FaceTime HD Camera` 被启用，NodeID 为 `node-xyz`
 - **THEN** 系统执行 `ffmpeg -f avfoundation -i "FaceTime HD Camera" -c:v libx264 -f flv rtmp://server.example.com:1935/live/node-xyz_video_facetime-hd-camera`
+
+### Requirement: Windows dshow uses device-supported capture options
+When starting a Windows DirectShow video device, Node SHALL query the device's
+ffmpeg dshow options and select a capture mode that the device advertises.
+The generated ffmpeg command SHALL use the selected `-video_size` and
+`-framerate`, and SHALL include an input `-pixel_format` when the selected
+mode advertises one.
+
+If option probing fails or returns no usable video modes, Node SHALL fall back
+to `640x480@30` instead of `640x480@15`.
+
+#### Scenario: Select a supported dshow mode
+- **WHEN** dshow option probing for `Integrated Camera` advertises
+  `640x480@30` with `pixel_format=yuyv422`
+- **THEN** Node builds the ffmpeg command with `-video_size 640x480`,
+  `-framerate 30`, and `-pixel_format yuyv422`
+
+#### Scenario: Fall back when dshow option probing is unavailable
+- **WHEN** dshow option probing fails or produces no parseable modes
+- **THEN** Node builds the ffmpeg command with `-video_size 640x480` and
+  `-framerate 30`
