@@ -2,35 +2,63 @@
 
 ## Purpose
 
-Manage ffmpeg subprocesses to push captured device video/audio to the Server via RTMP.
+Manage ffmpeg subprocesses that capture local devices and publish raw audio or
+video streams to the RTMP server.
 
 ## Requirements
 
+### Requirement: Raw stream names use the shared Server/Node convention
+
+Node SHALL construct raw RTMP stream names with the same normalization rule
+used by Server when it builds pull URLs:
+
+```text
+stream_name = device_name.replace(" ", "_") + "_" + device_type + "_" + server_device_id
+```
+
+`device_type` SHALL be `video` or `audio`. `server_device_id` SHALL be the
+Server database id for the selected `VideoDevice` or `AudioDevice`.
+
+#### Scenario: Known Server device id
+
+- **WHEN** the local device name is `Integrated Camera`, `device_type` is `video`, and the Server mapping resolves to id `1`
+- **THEN** Node publishes to `rtmp://{SERVER_BASE_URL}:{RTMP_PORT}/live/Integrated_Camera_video_1`
+
+#### Scenario: Unknown Server device id
+
+- **WHEN** Node starts a stream before the Server mapping is available
+- **THEN** Node SHALL use `0` as the `server_device_id` placeholder
+- **AND** the stream name SHALL still follow the same normalized format
+
+### Requirement: Node maintains Server device mappings after authentication
+
+After WSS authentication succeeds, Node SHALL store the device lists returned by
+Server as `server_device_id -> device_name` mappings, split by `device_type`.
+The mapping SHALL be used to resolve both incoming `UPDATE_STREAM` commands and
+outgoing RTMP stream names.
+
+#### Scenario: WSS authentication returns device mappings
+
+- **WHEN** Server returns `videos: [{id: 1, name: "Integrated Camera"}]` and `audios: [{id: 2, name: "Microphone Array"}]`
+- **THEN** Node records `video 1 -> Integrated Camera`
+- **AND** Node records `audio 2 -> Microphone Array`
+
 ### Requirement: Start ffmpeg RTMP push for a device
-当设备被标记为启用时，系统 SHALL 为该设备启动一个 ffmpeg 子进程，将设备捕获的视频/音频推流到 Server 的 RTMP 端点。
+
+When a device is enabled, Node SHALL start one ffmpeg subprocess for that
+device and publish the captured raw audio or video to the normalized RTMP URL.
 
 #### Scenario: Start streaming a video device
-- **WHEN** 设备 `cam-01`（视频输入）被启用
-- **THEN** 系统执行 `ffmpeg -f dshow -i "cam-01" -c:v libx264 -preset veryfast -tune zerolatency -f flv <rtmp_url>`（Windows），子进程进入运行态
 
-#### Scenario: Start streaming with platform-specific input format
-- **WHEN** 运行在 macOS 且设备 `FaceTime HD Camera` 被启用
-- **THEN** 系统执行 `ffmpeg -f avfoundation -i "FaceTime HD Camera" -c:v libx264 -f flv <rtmp_url>`
+- **WHEN** the video device `Integrated Camera` is enabled and maps to Server id `1`
+- **THEN** Node starts an ffmpeg process whose output URL ends with `/live/Integrated_Camera_video_1`
 
 ### Requirement: Stop ffmpeg RTMP push for a device
-当设备从启用表中移除时，系统 SHALL 终止对应的 ffmpeg 子进程。
+
+When a device is removed from the active registry, Node SHALL terminate the
+corresponding ffmpeg subprocess.
 
 #### Scenario: Stop an active stream
-- **WHEN** 设备 `cam-01` 被停用且对应 ffmpeg 进程正在运行
-- **THEN** 系统调用 `process.terminate()`，等待最多 5 秒后 `process.wait()`，成功停止
 
-#### Scenario: Force kill stuck ffmpeg
-- **WHEN** ffmpeg 进程在 5 秒内未响应 `terminate()`
-- **THEN** 系统调用 `process.kill()` 强制结束
-
-### Requirement: Each device gets a dedicated RTMP URL
-每个设备的 RTMP 推流地址 SHALL 由配置的 `SERVER_RTMP_URL` 基础地址 + `/<device_id>` 拼接而成。
-
-#### Scenario: RTMP URL construction
-- **WHEN** `SERVER_RTMP_URL` 配置为 `rtmp://server.example.com/live`
-- **THEN** 设备 `cam-01` 的推流地址为 `rtmp://server.example.com/live/cam-01`
+- **WHEN** a streaming device is disabled
+- **THEN** Node terminates the corresponding ffmpeg process and removes it from the running process table

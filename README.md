@@ -67,10 +67,12 @@ Node                                    Server
 ### RTMP URL 格式
 
 ```
-rtmp://{SERVER_BASE_URL}:{RTMP_PORT}/live/{nodeid}_{device_type}_{device_name_slug}
+rtmp://{SERVER_BASE_URL}:{RTMP_PORT}/live/{device_name}_{device_type}_{server_device_id}
 ```
 
-示例: `rtmp://192.168.1.100:1935/live/node-abc123_video_integrated-camera`
+`device_name` 中的空格替换为下划线；`server_device_id` 是 Server 数据库中的 video/audio id，未映射时 Node 使用 `0` 占位。
+
+示例: `rtmp://192.168.1.100:1935/live/Integrated_Camera_video_1`
 
 ### 编码器选择
 
