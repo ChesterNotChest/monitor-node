@@ -42,8 +42,19 @@ class CommandHandler:
         """WSS 消息入口。由 WssClient._handler 调用。
 
         Args:
-            data: Server 发来的原始 JSON dict，必须包含 "command" 字段。
+            data: Server 发来的原始 JSON dict，包含 "command" 或 "type" 字段。
         """
+        # 设备映射同步（心跳回传）
+        if data.get("type") == "device_map":
+            from network.models import set_server_device_maps
+            set_server_device_maps(
+                data.get("videos", []),
+                data.get("audios", []),
+            )
+            logger.info("device_map updated: videos=%d audios=%d",
+                        len(data.get("videos", [])), len(data.get("audios", [])))
+            return
+
         command = data.get("command", "")
         logger.debug("CommandHandler.dispatch: %s", command)
 

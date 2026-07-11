@@ -331,12 +331,31 @@ class WssClient:
     # ------------------------------------------------------------------
 
     async def _heartbeat_loop(self) -> None:
-        """Send periodic heartbeat pings. Only runs after authentication."""
+        """Send periodic heartbeat pings with device list. Only runs after authentication."""
+        from services.device_registry import device_registry
+        from network.models import get_cached_devices
+
         while self._connected and self._running:
             await asyncio.sleep(_HEARTBEAT_INTERVAL)
             if self._connected and self._ws and self._auth_status == AuthStatus.AUTHENTICATED:
                 try:
-                    await self._send({"type": "heartbeat"})
+                    # merge enabled + cached devices so Server knows all available devices
+                    seen: set[tuple[str, str]] = set()
+                    merged: list[dict[str, str]] = []
+                    for d in await device_registry.list():
+                        key = (d.device_type, d.device_name)
+                        if key not in seen:
+                            seen.add(key)
+                            merged.append({"device_type": d.device_type, "device_name": d.device_name})
+                    for d in get_cached_devices():
+                        key = (d.device_type, d.device_name)
+                        if key not in seen:
+                            seen.add(key)
+                            merged.append({"device_type": d.device_type, "device_name": d.device_name})
+                    await self._send({
+                        "type": "heartbeat",
+                        "devices": merged,
+                    })
                 except Exception:
                     logger.warning("Heartbeat send failed, connection may be dead")
                     break
