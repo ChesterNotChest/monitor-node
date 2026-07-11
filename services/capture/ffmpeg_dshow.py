@@ -21,7 +21,7 @@ _VIDEO_OPTION_LINE = re.compile(
 _FALLBACK_VIDEO_SIZE = "640x480"
 _FALLBACK_FRAMERATE = "30"
 _PREFERRED_SIZES = ("640x480", "848x480", "960x540", "1280x720")
-_PREFERRED_FPS = ("30", "25", "20", "15", "10")
+_PREFERRED_FPS = ("20", "15", "25", "10", "30")
 _PREFERRED_PIXEL_FORMATS = ("yuyv422", "nv12", "uyvy422", "rgb24")
 
 
@@ -77,7 +77,8 @@ class FfmpegDshowDriver(CaptureDriver):
         option = self._select_video_option(self._device_name_from_input(input_name))
         cmd = [
             "ffmpeg",
-            "-rtbufsize", "256M",
+            "-fflags", "nobuffer",
+            "-rtbufsize", "4M",
             "-f", "dshow",
             "-video_size", option.size,
             "-framerate", option.framerate,
@@ -86,7 +87,9 @@ class FfmpegDshowDriver(CaptureDriver):
             cmd.extend(["-pixel_format", option.pixel_format])
         cmd.extend([
             "-i", input_name,
+            "-vf", "drawtext=text='%{localtime}':fontsize=14:fontcolor=white:x=W-tw-10:y=H-th-10",
             "-c:v", get_video_encoder(),
+            "-b:v", "1M",
             "-pix_fmt", "yuv420p",
             "-f", "flv",
             rtmp_url,
@@ -98,7 +101,7 @@ class FfmpegDshowDriver(CaptureDriver):
         """Build ffmpeg command for an audio dshow device."""
         return [
             "ffmpeg",
-            "-rtbufsize", "256M",
+            "-rtbufsize", "8M",
             "-f", "dshow",
             "-i", f"audio={device.device_name}",
             "-c:a", get_audio_encoder(),
