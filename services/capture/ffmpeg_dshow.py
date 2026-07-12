@@ -87,6 +87,7 @@ class FfmpegDshowDriver(CaptureDriver):
             cmd.extend(["-pixel_format", option.pixel_format])
         cmd.extend([
             "-i", input_name,
+            "-r", "20",
             "-vf", "drawtext=text='%{localtime}':fontsize=14:fontcolor=white:x=W-tw-10:y=H-th-10",
             "-c:v", get_video_encoder(),
             "-b:v", "1M",
