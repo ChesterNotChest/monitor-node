@@ -18,7 +18,7 @@ _FALLBACK_VIDEO = "mpeg4"
 _FALLBACK_AUDIO = "aac"
 
 # Priority order (first found wins)
-_VIDEO_PRIORITY = ("h264_mf", "libopenh264", "libx264", "mpeg4")
+_VIDEO_PRIORITY = ("libx264", "libopenh264", "h264_mf", "mpeg4")
 _AUDIO_PRIORITY = ("aac", "libmp3lame")
 
 
