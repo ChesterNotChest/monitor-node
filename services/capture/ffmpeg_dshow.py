@@ -93,6 +93,7 @@ class FfmpegDshowDriver(CaptureDriver):
             "-b:v", "1M",
             "-pix_fmt", "yuv420p",
             "-f", "flv",
+            "-rtmp_live", "live",
             rtmp_url,
             "-y",
         ])
@@ -108,6 +109,7 @@ class FfmpegDshowDriver(CaptureDriver):
             "-c:a", get_audio_encoder(),
             "-b:a", "128k",
             "-f", "flv",
+            "-rtmp_live", "live",
             rtmp_url,
             "-y",
         ]
