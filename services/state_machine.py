@@ -120,7 +120,20 @@ class StreamStateMachine:
         for device_id in enabled_ids & running_set:
             proc_handle = self._runner._processes.get(device_id)
             if proc_handle is not None and proc_handle.returncode is not None:
-                # Process exited — log reconnection on transition
+                # 诊断：读出 stderr 看 ffmpeg 为什么崩了
+                stderr_info = ""
+                if proc_handle.stderr is not None:
+                    try:
+                        stderr_data = await asyncio.wait_for(proc_handle.stderr.read(), timeout=2.0)
+                        stderr_info = stderr_data[-500:].decode(errors="replace") if stderr_data else "(empty)"
+                    except asyncio.TimeoutError:
+                        stderr_info = "(read timeout)"
+                    except Exception:
+                        stderr_info = "(read error)"
+                logger.error(
+                    "ffmpeg crashed device=%s rc=%d stderr=%s",
+                    device_id, proc_handle.returncode, stderr_info,
+                )
                 was = device_id in self._was_connected
                 self._was_connected.discard(device_id)
                 self._runner._processes.pop(device_id, None)
