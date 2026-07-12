@@ -7,7 +7,11 @@ import asyncio
 import pytest
 
 from services.capture.ffmpeg_avfoundation import FfmpegAvfoundationDriver
-from services.capture.ffmpeg_dshow import FfmpegDshowDriver
+from services.capture.ffmpeg_dshow import (
+    DshowVideoOption,
+    FfmpegDshowDriver,
+    parse_dshow_video_options,
+)
 from services.capture.ffmpeg_v4l2 import FfmpegV4l2Driver
 from services.device_enumerator import enumerate_devices
 
@@ -64,13 +68,59 @@ class TestDshowParsing:
         assert self.driver.parse_device_list("") == []
 
     def test_dshow_command(self):
+        self.driver._video_options_cache["Test Camera"] = [
+            DshowVideoOption("640x480", "30", "yuyv422"),
+        ]
         cmd = self.driver.capture_command(
             _make_device("cam-01", "video", "Test Camera"),
             "rtmp://server/live/cam-01",
         )
         assert "video=Test Camera" in cmd
-        assert "libx264" in cmd
+        assert cmd[cmd.index("-video_size") + 1] == "640x480"
+        assert cmd[cmd.index("-framerate") + 1] == "30"
+        assert cmd[cmd.index("-pixel_format") + 1] == "yuyv422"
+        assert "-c:v" in cmd  # video encoder flag present (encoder selected dynamically)
         assert "rtmp://server/live/cam-01" in cmd
+
+    def test_parse_dshow_video_options(self):
+        stderr = """
+[in#0 @ 000002BB01A31980] DirectShow video device options (from video devices)
+[in#0 @ 000002BB01A31980]   pixel_format=yuyv422  min s=1280x720 fps=30 max s=1280x720 fps=30
+[in#0 @ 000002BB01A31980]   pixel_format=yuyv422  min s=640x480 fps=30 max s=640x480 fps=30
+[in#0 @ 000002BB01A31980]   pixel_format=nv12  min s=640x480 fps=15 max s=640x480 fps=15
+[in#0 @ 000002BB01A31980]   vcodec=mjpeg  min s=1920x1080 fps=30 max s=1920x1080 fps=30
+"""
+        options = parse_dshow_video_options(stderr)
+        assert DshowVideoOption("640x480", "30", "yuyv422") in options
+        assert DshowVideoOption("1920x1080", "30") in options
+
+    def test_selects_supported_dshow_mode(self):
+        self.driver._video_options_cache["Integrated Camera"] = [
+            DshowVideoOption("1280x720", "30", "yuyv422"),
+            DshowVideoOption("640x480", "30", "yuyv422"),
+            DshowVideoOption("640x480", "15", "nv12"),
+        ]
+        cmd = self.driver.capture_command(
+            _make_device("cam-01", "video", "Integrated Camera"),
+            "rtmp://server/live/cam-01",
+        )
+        assert cmd[cmd.index("-video_size") + 1] == "640x480"
+        assert cmd[cmd.index("-framerate") + 1] == "30"
+        assert cmd[cmd.index("-pixel_format") + 1] == "yuyv422"
+
+    def test_dshow_command_fallback_when_probe_fails(self, monkeypatch):
+        monkeypatch.setattr(
+            self.driver,
+            "_probe_video_options",
+            lambda _device_name: [],
+        )
+        cmd = self.driver.capture_command(
+            _make_device("cam-01", "video", "Offline Camera"),
+            "rtmp://server/live/cam-01",
+        )
+        assert cmd[cmd.index("-video_size") + 1] == "640x480"
+        assert cmd[cmd.index("-framerate") + 1] == "30"
+        assert "-pixel_format" not in cmd
 
 
 class TestAvfoundationParsing:
@@ -129,7 +179,7 @@ class TestEnumeratorWithMock:
 # ---------------------------------------------------------------------------
 
 def _make_device(device_id, device_type, device_name):
-    from network.api import DeviceItem
+    from network.models import DeviceItem
     return DeviceItem(device_id=device_id, device_type=device_type, device_name=device_name)
 
 

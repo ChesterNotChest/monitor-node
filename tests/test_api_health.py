@@ -23,8 +23,7 @@ class TestHealthEndpoints:
         data = resp.json()
         assert data["status"] == "ok"
 
-    def test_docs_accessible(self, client: TestClient):
-        """GET /docs should be accessible (Swagger UI)."""
+    def test_docs_not_accessible(self, client: TestClient):
+        """GET /docs should return 404 (Swagger UI removed — WSS-only architecture)."""
         resp = client.get("/docs")
-        assert resp.status_code == 200
-        assert "swagger" in resp.text.lower() or "openapi" in resp.text.lower()
+        assert resp.status_code == 404

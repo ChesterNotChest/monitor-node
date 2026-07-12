@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from network.api import DeviceItem
+from network.models import DeviceItem
 from services.ffmpeg_runner import FfmpegRunner, _build_rtmp_url, _is_debug_mode
 
 
@@ -22,7 +22,16 @@ def cam_device():
     return DeviceItem(
         device_id="cam-01",
         device_type="video",
-        device_name="Test Camera",
+        device_name="Integrated Camera",
+    )
+
+
+@pytest.fixture
+def audio_device():
+    return DeviceItem(
+        device_id="mic-01",
+        device_type="audio",
+        device_name="Microphone Array",
     )
 
 
@@ -32,29 +41,40 @@ def cam_device():
 
 
 class TestRtmpUrl:
-    def test_default_url(self, monkeypatch):
-        monkeypatch.delenv("SERVER_RTMP_URL", raising=False)
-        monkeypatch.setenv("STREAM_DEBUG", "false")
-        url = _build_rtmp_url("cam-01")
-        assert url == "rtmp://127.0.0.1:1935/live/cam-01"
+    def test_url_format_with_server_mapping(self, monkeypatch, cam_device):
+        """RTMP URL 使用 {device_name}_{device_type}_{device_id} 格式，空格→下划线。"""
+        monkeypatch.setenv("RTMP_DEBUG", "false")
+        monkeypatch.setenv("SERVER_BASE_URL", "192.168.1.100")
+        monkeypatch.setenv("RTMP_PORT", "1935")
 
-    def test_custom_url(self, monkeypatch):
-        monkeypatch.setenv("SERVER_RTMP_URL", "rtmp://myserver.example.com/live")
-        monkeypatch.setenv("STREAM_DEBUG", "false")
-        url = _build_rtmp_url("cam-01")
-        assert url == "rtmp://myserver.example.com/live/cam-01"
+        url = _build_rtmp_url(cam_device, server_device_id=1)
+        assert url == "rtmp://192.168.1.100:1935/live/Integrated_Camera_video_1"
 
-    def test_url_no_trailing_slash(self, monkeypatch):
-        monkeypatch.setenv("SERVER_RTMP_URL", "rtmp://server/live")
-        monkeypatch.setenv("STREAM_DEBUG", "false")
-        url = _build_rtmp_url("cam-01")
-        assert url == "rtmp://server/live/cam-01"
+    def test_url_debug_mode(self, monkeypatch, cam_device):
+        """RTMP_DEBUG 时强制 127.0.0.1。"""
+        monkeypatch.setenv("RTMP_DEBUG", "true")
+        monkeypatch.setenv("RTMP_PORT", "1935")
 
-    def test_url_with_trailing_slash(self, monkeypatch):
-        monkeypatch.setenv("SERVER_RTMP_URL", "rtmp://server/live/")
-        monkeypatch.setenv("STREAM_DEBUG", "false")
-        url = _build_rtmp_url("cam-01")
-        assert url == "rtmp://server/live/cam-01"
+        url = _build_rtmp_url(cam_device, server_device_id=1)
+        assert url.startswith("rtmp://127.0.0.1:1935/live/Integrated_Camera_video_")
+
+    def test_url_audio_device(self, monkeypatch, audio_device):
+        """音频设备 URL 包含 audio 类型，空格→下划线。"""
+        monkeypatch.setenv("RTMP_DEBUG", "false")
+        monkeypatch.setenv("SERVER_BASE_URL", "server.local")
+        monkeypatch.setenv("RTMP_PORT", "1935")
+
+        url = _build_rtmp_url(audio_device, server_device_id=2)
+        assert "Microphone_Array_audio_2" in url
+
+    def test_url_zero_device_id(self, monkeypatch, cam_device):
+        """未映射时使用 device_id=0 占位。"""
+        monkeypatch.setenv("RTMP_DEBUG", "false")
+        monkeypatch.setenv("SERVER_BASE_URL", "192.168.1.100")
+        monkeypatch.setenv("RTMP_PORT", "1935")
+
+        url = _build_rtmp_url(cam_device)
+        assert "_video_0" in url
 
 
 # ---------------------------------------------------------------------------
@@ -64,19 +84,19 @@ class TestRtmpUrl:
 
 class TestDebugMode:
     def test_debug_off_by_default(self, monkeypatch):
-        monkeypatch.delenv("STREAM_DEBUG", raising=False)
+        monkeypatch.delenv("RTMP_DEBUG", raising=False)
         assert _is_debug_mode() is False
 
     def test_debug_true(self, monkeypatch):
-        monkeypatch.setenv("STREAM_DEBUG", "true")
+        monkeypatch.setenv("RTMP_DEBUG", "true")
         assert _is_debug_mode() is True
 
     def test_debug_1(self, monkeypatch):
-        monkeypatch.setenv("STREAM_DEBUG", "1")
+        monkeypatch.setenv("RTMP_DEBUG", "1")
         assert _is_debug_mode() is True
 
     def test_debug_false(self, monkeypatch):
-        monkeypatch.setenv("STREAM_DEBUG", "false")
+        monkeypatch.setenv("RTMP_DEBUG", "false")
         assert _is_debug_mode() is False
 
 
@@ -89,6 +109,9 @@ class TestStartStop:
     @pytest.mark.asyncio
     async def test_start_stream_creates_subprocess(self, runner, cam_device, monkeypatch):
         monkeypatch.setattr("sys.platform", "win32")
+        monkeypatch.setenv("RTMP_DEBUG", "false")
+        monkeypatch.setenv("SERVER_BASE_URL", "127.0.0.1")
+        monkeypatch.setenv("RTMP_PORT", "1935")
 
         mock_proc = AsyncMock()
         mock_proc.returncode = None
@@ -128,7 +151,6 @@ class TestStartStop:
         mock_proc.returncode = None
         mock_proc.terminate = MagicMock()
         mock_proc.kill = MagicMock()
-        # First wait() → TimeoutError, second wait() (after kill) → success
         mock_proc.wait = AsyncMock(side_effect=[asyncio.TimeoutError(), None])
 
         runner._processes["cam-01"] = mock_proc
