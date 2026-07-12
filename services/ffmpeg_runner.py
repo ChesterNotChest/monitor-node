@@ -12,11 +12,25 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import sys
 from typing import Optional
 
 from network.models import DeviceItem, get_server_device_id
 from services.capture import get_capture_driver
+
+
+def _sanitize_stream_name(name: str) -> str:
+    """去除 device name 中的非 ASCII 字符，压缩空白为下划线。
+
+    RTMP URL 中的中文设备名会导致 ffmpeg 拉流阻塞。
+    此函数确保 stream key 仅含 ASCII 安全字符。
+    """
+    name = re.sub(r'[^\x20-\x7E]', '', name)       # 去除非 ASCII
+    name = re.sub(r'\s+', '_', name.strip())        # 空白 → _
+    name = re.sub(r'[^a-zA-Z0-9_.-]', '_', name)    # 特殊字符 → _
+    name = re.sub(r'_+', '_', name)                  # 合并连续下划线
+    return name.strip('_')
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +64,8 @@ def _build_rtmp_url(device: DeviceItem, server_device_id: int = 0) -> str:
     host = _resolve_rtmp_host()
     port = os.getenv("RTMP_PORT", "1935")
     device_type = device.device_type or "unknown"
-    # 空格 → 下划线，保留其他字符
-    url_name = device.device_name.replace(" ", "_")
+    # ASCII sanitize: 去除非 ASCII 字符，确保 RTMP URL 安全
+    url_name = _sanitize_stream_name(device.device_name)
 
     # 优先从 Server 映射表获取 device_id
     if server_device_id == 0:
