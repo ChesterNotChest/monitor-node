@@ -17,8 +17,8 @@ logger = logging.getLogger(__name__)
 _FALLBACK_VIDEO = "mpeg4"
 _FALLBACK_AUDIO = "aac"
 
-# Priority order (first found wins)
-_VIDEO_PRIORITY = ("libx264", "libopenh264", "h264_mf", "mpeg4")
+# Priority: GPU encoders → libx264 → Windows fallback
+_VIDEO_PRIORITY = ("h264_qsv", "h264_amf", "libx264", "libopenh264", "h264_mf", "mpeg4")
 _AUDIO_PRIORITY = ("aac", "libmp3lame")
 
 
